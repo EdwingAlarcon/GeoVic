@@ -8,10 +8,10 @@ echo   Configurado para Colombia
 echo ================================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 
 REM Verificar que existe el archivo .env
-if not exist "..\.env" (
+if not exist ".env" (
     echo ERROR: Archivo .env no encontrado
     echo Por favor configure sus credenciales primero
     echo.

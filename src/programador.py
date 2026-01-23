@@ -4,11 +4,15 @@ Configurado para Colombia con manejo de festivos
 """
 import asyncio
 import logging
+import sys
 from datetime import datetime, date
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from pathlib import Path
+
+# Agregar el directorio raíz al path para importaciones
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.geovictoria import run
 from src.festivos_colombia import es_dia_laborable, es_festivo, listar_festivos_año
