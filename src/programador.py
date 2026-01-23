@@ -187,7 +187,10 @@ def main():
     logger.info("\n📋 TRABAJOS PROGRAMADOS:")
     logger.info("=" * 80)
     for job in scheduler.get_jobs():
-        next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else 'N/A'
+        try:
+            next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else 'N/A'
+        except AttributeError:
+            next_run = 'Información no disponible'
         logger.info(f"  ✓ {job.name:25} | Próxima ejecución: {next_run}")
     logger.info("=" * 80)
     
