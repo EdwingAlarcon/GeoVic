@@ -5,7 +5,8 @@ Configurado para Colombia con manejo de festivos
 import asyncio
 import logging
 import sys
-from datetime import datetime, date
+import json
+from datetime import datetime, date, time
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
@@ -17,10 +18,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.geovictoria import run
 from src.festivos_colombia import es_dia_laborable, es_festivo, listar_festivos_año
 
-# Configuración de logging
+# Configuración de logging y registro de ejecuciones
 log_dir = Path(__file__).parent / "logs"
 log_dir.mkdir(exist_ok=True)
 log_file = log_dir / f"programador_{datetime.now().strftime('%Y%m%d')}.log"
+registro_file = log_dir / "registro_ejecuciones.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +48,54 @@ class HorarioConfig:
     ENTRADA_SABADO_MINUTO = 0
     SALIDA_SABADO_HORA = 13  # 1 PM
     SALIDA_SABADO_MINUTO = 0
+
+def leer_registro_ejecuciones():
+    """Lee el registro de ejecuciones del archivo JSON"""
+    try:
+        if registro_file.exists():
+            with open(registro_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Error leyendo registro de ejecuciones: {e}")
+    return {}
+
+def guardar_registro_ejecucion(tipo_marcaje: str):
+    """Guarda en el registro que se ejecutó un marcaje"""
+    try:
+        registro = leer_registro_ejecuciones()
+        hoy = date.today().isoformat()
+        ahora = datetime.now().isoformat()
+        
+        if hoy not in registro:
+            registro[hoy] = {}
+        
+        registro[hoy][tipo_marcaje] = {
+            'ejecutado': True,
+            'hora': ahora
+        }
+        
+        # Limpiar registros antiguos (mantener solo últimos 30 días)
+        fechas = sorted(registro.keys(), reverse=True)
+        if len(fechas) > 30:
+            for fecha_antigua in fechas[30:]:
+                del registro[fecha_antigua]
+        
+        with open(registro_file, 'w', encoding='utf-8') as f:
+            json.dump(registro, f, indent=2, ensure_ascii=False)
+        
+        logger.debug(f"Registro guardado: {tipo_marcaje} a las {ahora}")
+    except Exception as e:
+        logger.error(f"Error guardando registro de ejecución: {e}")
+
+def ya_se_ejecuto_hoy(tipo_marcaje: str) -> bool:
+    """Verifica si ya se ejecutó un tipo de marcaje hoy"""
+    registro = leer_registro_ejecuciones()
+    hoy = date.today().isoformat()
+    
+    if hoy in registro and tipo_marcaje in registro[hoy]:
+        return registro[hoy][tipo_marcaje].get('ejecutado', False)
+    
+    return False
 
 def ejecutar_marcaje_con_validacion(tipo_marcaje: str):
     """
@@ -80,6 +130,8 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str):
     try:
         asyncio.run(run())
         logger.info(f"✅ {tipo_marcaje} completado exitosamente")
+        # Registrar la ejecución exitosa
+        guardar_registro_ejecucion(tipo_marcaje)
     except Exception as e:
         logger.error(f"❌ Error ejecutando {tipo_marcaje}: {e}", exc_info=True)
     
@@ -101,6 +153,83 @@ def salida_sabado():
     """Marcaje de salida Sábados"""
     ejecutar_marcaje_con_validacion("SALIDA SÁBADO")
 
+def verificar_marcajes_pendientes():
+    """Verifica y ejecuta marcajes pendientes si el PC se inició tarde"""
+    hoy = date.today()
+    ahora = datetime.now()
+    dia_semana = hoy.weekday()
+    hora_actual = ahora.time()
+    
+    logger.info("\n" + "=" * 80)
+    logger.info("🔍 VERIFICANDO MARCAJES PENDIENTES")
+    logger.info(f"📅 Fecha: {hoy.strftime('%A, %d de %B de %Y')}")
+    logger.info(f"🕐 Hora actual: {ahora.strftime('%H:%M:%S')}")
+    logger.info("=" * 80)
+    
+    # No verificar si es domingo o festivo
+    if es_festivo(hoy):
+        logger.info("🎉 Hoy es festivo - No hay marcajes pendientes")
+        logger.info("=" * 80)
+        return
+    
+    if dia_semana == 6:  # Domingo
+        logger.info("📅 Hoy es domingo - No hay marcajes pendientes")
+        logger.info("=" * 80)
+        return
+    
+    # Determinar horarios y tipos de marcaje según el día
+    if dia_semana == 5:  # Sábado
+        hora_entrada = time(HorarioConfig.ENTRADA_SABADO_HORA, HorarioConfig.ENTRADA_SABADO_MINUTO)
+        hora_salida = time(HorarioConfig.SALIDA_SABADO_HORA, HorarioConfig.SALIDA_SABADO_MINUTO)
+        tipo_entrada = "ENTRADA SÁBADO"
+        tipo_salida = "SALIDA SÁBADO"
+    else:  # Lunes a Viernes
+        hora_entrada = time(HorarioConfig.ENTRADA_SEMANA_HORA, HorarioConfig.ENTRADA_SEMANA_MINUTO)
+        hora_salida = time(HorarioConfig.SALIDA_SEMANA_HORA, HorarioConfig.SALIDA_SEMANA_MINUTO)
+        tipo_entrada = "ENTRADA SEMANA (L-V)"
+        tipo_salida = "SALIDA SEMANA (L-V)"
+    
+    marcajes_ejecutados = 0
+    
+    # Verificar entrada pendiente
+    if hora_actual > hora_entrada:
+        if not ya_se_ejecuto_hoy(tipo_entrada):
+            logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_entrada}")
+            logger.info(f"   • Hora programada: {hora_entrada.strftime('%H:%M')}")
+            logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+            logger.info(f"   • El PC probablemente se inició tarde")
+            logger.info("   • Ejecutando marcaje pendiente...")
+            logger.info("=" * 80)
+            
+            ejecutar_marcaje_con_validacion(tipo_entrada)
+            marcajes_ejecutados += 1
+        else:
+            logger.info(f"✅ {tipo_entrada} ya fue ejecutado hoy")
+    else:
+        logger.info(f"⏰ Aún no es hora de marcar entrada (programado: {hora_entrada.strftime('%H:%M')})")
+    
+    # Verificar salida pendiente
+    if hora_actual > hora_salida:
+        if not ya_se_ejecuto_hoy(tipo_salida):
+            logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_salida}")
+            logger.info(f"   • Hora programada: {hora_salida.strftime('%H:%M')}")
+            logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+            logger.info(f"   • El PC probablemente se inició tarde")
+            logger.info("   • Ejecutando marcaje pendiente...")
+            logger.info("=" * 80)
+            
+            ejecutar_marcaje_con_validacion(tipo_salida)
+            marcajes_ejecutados += 1
+        else:
+            logger.info(f"✅ {tipo_salida} ya fue ejecutado hoy")
+    else:
+        logger.info(f"⏰ Aún no es hora de marcar salida (programado: {hora_salida.strftime('%H:%M')})")
+    
+    if marcajes_ejecutados == 0:
+        logger.info("✅ No hay marcajes pendientes")
+    
+    logger.info("=" * 80)
+
 def job_listener(event):
     """Escuchar eventos de trabajos"""
     if event.exception:
@@ -118,6 +247,9 @@ def main():
     # Mostrar festivos del año actual
     año_actual = datetime.now().year
     listar_festivos_año(año_actual)
+    
+    # Verificar si hay marcajes pendientes (PC iniciado tarde)
+    verificar_marcajes_pendientes()
     
     # Crear scheduler
     scheduler = BlockingScheduler(timezone='America/Bogota')
