@@ -6,7 +6,8 @@ import asyncio
 import logging
 import sys
 import json
-from datetime import datetime, date, time
+import random
+from datetime import datetime, date, time, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
@@ -48,6 +49,33 @@ class HorarioConfig:
     ENTRADA_SABADO_MINUTO = 0
     SALIDA_SABADO_HORA = 13  # 1 PM
     SALIDA_SABADO_MINUTO = 0
+    
+    # Variación aleatoria (en minutos) - Comportamiento humano realista
+    # Para entrada: ocasionalmente antes, usualmente puntual o poco tarde
+    VARIACION_ENTRADA_MIN = -2
+    VARIACION_ENTRADA_MAX = 8
+    
+    # Para salida: ocasionalmente antes, frecuentemente unos minutos tarde
+    VARIACION_SALIDA_MIN = -3
+    VARIACION_SALIDA_MAX = 12
+
+def calcular_horario_aleatorio(hora_base, minuto_base, variacion_min, variacion_max):
+    """Calcula un horario aleatorio dentro del rango especificado"""
+    # Crear datetime base para hoy
+    ahora = datetime.now()
+    dt_base = datetime(ahora.year, ahora.month, ahora.day, hora_base, minuto_base)
+    
+    # Calcular variación aleatoria en minutos
+    variacion_minutos = random.randint(variacion_min, variacion_max)
+    
+    # Aplicar variación
+    dt_aleatorio = dt_base + timedelta(minutes=variacion_minutos)
+    
+    logger.info(f"⏰ Horario base: {dt_base.strftime('%H:%M')}")
+    logger.info(f"🎲 Variación aplicada: {variacion_minutos:+d} minutos")
+    logger.info(f"🕐 Horario calculado: {dt_aleatorio.strftime('%H:%M')}")
+    
+    return dt_aleatorio.time(), variacion_minutos
 
 def leer_registro_ejecuciones():
     """Lee el registro de ejecuciones del archivo JSON"""
@@ -59,7 +87,7 @@ def leer_registro_ejecuciones():
         logger.warning(f"Error leyendo registro de ejecuciones: {e}")
     return {}
 
-def guardar_registro_ejecucion(tipo_marcaje: str):
+def guardar_registro_ejecucion(tipo_marcaje: str, variacion_minutos: int = 0):
     """Guarda en el registro que se ejecutó un marcaje"""
     try:
         registro = leer_registro_ejecuciones()
@@ -71,7 +99,8 @@ def guardar_registro_ejecucion(tipo_marcaje: str):
         
         registro[hoy][tipo_marcaje] = {
             'ejecutado': True,
-            'hora': ahora
+            'hora': ahora,
+            'variacion_minutos': variacion_minutos
         }
         
         # Limpiar registros antiguos (mantener solo últimos 30 días)
@@ -97,7 +126,7 @@ def ya_se_ejecuto_hoy(tipo_marcaje: str) -> bool:
     
     return False
 
-def ejecutar_marcaje_con_validacion(tipo_marcaje: str):
+def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 0):
     """
     Ejecutar marcaje solo si es día laborable (no festivo ni domingo)
     """
@@ -107,6 +136,8 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str):
     logger.info(f"🔔 Intento de marcaje programado: {tipo_marcaje}")
     logger.info(f"📅 Fecha: {hoy.strftime('%A, %d de %B de %Y')}")
     logger.info(f"🕐 Hora: {datetime.now().strftime('%H:%M:%S')}")
+    if variacion_minutos != 0:
+        logger.info(f"🎲 Variación aleatoria: {variacion_minutos:+d} minutos")
     
     # Verificar si es festivo
     if es_festivo(hoy):
@@ -131,7 +162,7 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str):
         asyncio.run(run())
         logger.info(f"✅ {tipo_marcaje} completado exitosamente")
         # Registrar la ejecución exitosa
-        guardar_registro_ejecucion(tipo_marcaje)
+        guardar_registro_ejecucion(tipo_marcaje, variacion_minutos)
     except Exception as e:
         logger.error(f"❌ Error ejecutando {tipo_marcaje}: {e}", exc_info=True)
     
@@ -152,6 +183,23 @@ def entrada_sabado():
 def salida_sabado():
     """Marcaje de salida Sábados"""
     ejecutar_marcaje_con_validacion("SALIDA SÁBADO")
+
+# Versiones con variación aleatoria
+def entrada_semana_con_variacion(variacion_minutos):
+    """Marcaje de entrada Lunes a Viernes con variación aleatoria"""
+    ejecutar_marcaje_con_validacion("ENTRADA SEMANA (L-V)", variacion_minutos)
+
+def salida_semana_con_variacion(variacion_minutos):
+    """Marcaje de salida Lunes a Viernes con variación aleatoria"""
+    ejecutar_marcaje_con_validacion("SALIDA SEMANA (L-V)", variacion_minutos)
+
+def entrada_sabado_con_variacion(variacion_minutos):
+    """Marcaje de entrada Sábados con variación aleatoria"""
+    ejecutar_marcaje_con_validacion("ENTRADA SÁBADO", variacion_minutos)
+
+def salida_sabado_con_variacion(variacion_minutos):
+    """Marcaje de salida Sábados con variación aleatoria"""
+    ejecutar_marcaje_con_validacion("SALIDA SÁBADO", variacion_minutos)
 
 def verificar_marcajes_pendientes():
     """Verifica y ejecuta marcajes pendientes si el PC se inició tarde"""
@@ -257,67 +305,97 @@ def main():
     # Agregar listener para eventos
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     
-    # Configurar trabajos programados
+    # Configurar trabajos programados con horarios aleatorios
+    logger.info("\n🎲 CALCULANDO HORARIOS ALEATORIOS PARA HOY:")
+    logger.info("=" * 80)
     
-    # LUNES A VIERNES - ENTRADA 7:00 AM
+    # LUNES A VIERNES - ENTRADA con variación aleatoria
+    entrada_semana_time, var_entrada_semana = calcular_horario_aleatorio(
+        HorarioConfig.ENTRADA_SEMANA_HORA,
+        HorarioConfig.ENTRADA_SEMANA_MINUTO,
+        HorarioConfig.VARIACION_ENTRADA_MIN,
+        HorarioConfig.VARIACION_ENTRADA_MAX
+    )
     scheduler.add_job(
-        entrada_semana,
+        lambda: entrada_semana_con_variacion(var_entrada_semana),
         CronTrigger(
             day_of_week='mon-fri',
-            hour=HorarioConfig.ENTRADA_SEMANA_HORA,
-            minute=HorarioConfig.ENTRADA_SEMANA_MINUTO,
+            hour=entrada_semana_time.hour,
+            minute=entrada_semana_time.minute,
             timezone='America/Bogota'
         ),
         id='entrada_semana',
-        name='Entrada L-V 7:00 AM',
+        name=f'Entrada L-V {entrada_semana_time.strftime("%H:%M")}',
         max_instances=1,
         coalesce=True
     )
+    logger.info("")
     
-    # LUNES A VIERNES - SALIDA 5:00 PM
+    # LUNES A VIERNES - SALIDA con variación aleatoria
+    salida_semana_time, var_salida_semana = calcular_horario_aleatorio(
+        HorarioConfig.SALIDA_SEMANA_HORA,
+        HorarioConfig.SALIDA_SEMANA_MINUTO,
+        HorarioConfig.VARIACION_SALIDA_MIN,
+        HorarioConfig.VARIACION_SALIDA_MAX
+    )
     scheduler.add_job(
-        salida_semana,
+        lambda: salida_semana_con_variacion(var_salida_semana),
         CronTrigger(
             day_of_week='mon-fri',
-            hour=HorarioConfig.SALIDA_SEMANA_HORA,
-            minute=HorarioConfig.SALIDA_SEMANA_MINUTO,
+            hour=salida_semana_time.hour,
+            minute=salida_semana_time.minute,
             timezone='America/Bogota'
         ),
         id='salida_semana',
-        name='Salida L-V 5:00 PM',
+        name=f'Salida L-V {salida_semana_time.strftime("%H:%M")}',
         max_instances=1,
         coalesce=True
     )
+    logger.info("")
     
-    # SÁBADOS - ENTRADA 7:00 AM
+    # SÁBADOS - ENTRADA con variación aleatoria
+    entrada_sabado_time, var_entrada_sabado = calcular_horario_aleatorio(
+        HorarioConfig.ENTRADA_SABADO_HORA,
+        HorarioConfig.ENTRADA_SABADO_MINUTO,
+        HorarioConfig.VARIACION_ENTRADA_MIN,
+        HorarioConfig.VARIACION_ENTRADA_MAX
+    )
     scheduler.add_job(
-        entrada_sabado,
+        lambda: entrada_sabado_con_variacion(var_entrada_sabado),
         CronTrigger(
             day_of_week='sat',
-            hour=HorarioConfig.ENTRADA_SABADO_HORA,
-            minute=HorarioConfig.ENTRADA_SABADO_MINUTO,
+            hour=entrada_sabado_time.hour,
+            minute=entrada_sabado_time.minute,
             timezone='America/Bogota'
         ),
         id='entrada_sabado',
-        name='Entrada Sábado 7:00 AM',
+        name=f'Entrada Sábado {entrada_sabado_time.strftime("%H:%M")}',
         max_instances=1,
         coalesce=True
     )
+    logger.info("")
     
-    # SÁBADOS - SALIDA 1:00 PM
+    # SÁBADOS - SALIDA con variación aleatoria
+    salida_sabado_time, var_salida_sabado = calcular_horario_aleatorio(
+        HorarioConfig.SALIDA_SABADO_HORA,
+        HorarioConfig.SALIDA_SABADO_MINUTO,
+        HorarioConfig.VARIACION_SALIDA_MIN,
+        HorarioConfig.VARIACION_SALIDA_MAX
+    )
     scheduler.add_job(
-        salida_sabado,
+        lambda: salida_sabado_con_variacion(var_salida_sabado),
         CronTrigger(
             day_of_week='sat',
-            hour=HorarioConfig.SALIDA_SABADO_HORA,
-            minute=HorarioConfig.SALIDA_SABADO_MINUTO,
+            hour=salida_sabado_time.hour,
+            minute=salida_sabado_time.minute,
             timezone='America/Bogota'
         ),
         id='salida_sabado',
-        name='Salida Sábado 1:00 PM',
+        name=f'Salida Sábado {salida_sabado_time.strftime("%H:%M")}',
         max_instances=1,
         coalesce=True
     )
+    logger.info("=" * 80)
     
     # Mostrar trabajos programados
     logger.info("\n📋 TRABAJOS PROGRAMADOS:")
@@ -335,6 +413,10 @@ def main():
     logger.info("  • Domingos: EXCLUIDOS (no se ejecuta)")
     logger.info("  • Festivos Colombia: EXCLUIDOS (validación automática)")
     logger.info("  • Zona horaria: America/Bogota")
+    logger.info("  • Horarios aleatorios: ACTIVADOS")
+    logger.info(f"    - Entrada: {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} minutos")
+    logger.info(f"    - Salida: {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} minutos")
+    logger.info("  • Nota: Los horarios se recalculan cada día automáticamente")
     logger.info("=" * 80)
     
     logger.info("\n⏰ Programador activo. Presione Ctrl+C para detener.\n")

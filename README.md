@@ -5,6 +5,7 @@ Sistema automatizado de marcaje de asistencia para GeoVictoria, configurado espe
 ## 📋 Características
 
 ✅ **Programación automática** - Lunes a Viernes y Sábados  
+✅ **Horarios aleatorios** - Simula comportamiento humano natural  
 ✅ **Exclusión de festivos** - Calendario oficial de Colombia  
 ✅ **Horarios personalizados** - Diferentes para semana y sábados  
 ✅ **Logs detallados** - Registro completo de operaciones  
@@ -14,12 +15,18 @@ Sistema automatizado de marcaje de asistencia para GeoVictoria, configurado espe
 ## ⚙️ Horarios Configurados
 
 ### 📅 Lunes a Viernes
-- **Entrada:** 7:00 AM
-- **Salida:** 5:00 PM
+- **Entrada:** 7:00 AM (±2 a 8 minutos de variación aleatoria)
+- **Salida:** 5:00 PM (±3 a 12 minutos de variación aleatoria)
 
 ### 📅 Sábados
-- **Entrada:** 7:00 AM
-- **Salida:** 1:00 PM
+- **Entrada:** 7:00 AM (±2 a 8 minutos de variación aleatoria)
+- **Salida:** 1:00 PM (±3 a 12 minutos de variación aleatoria)
+
+### 🎲 Horarios Aleatorios
+El sistema genera horarios aleatorios cada día para simular un comportamiento humano natural:
+- **Entrada**: Puede variar de 2 minutos antes a 8 minutos después (comportamiento puntual realista)
+- **Salida**: Puede variar de 3 minutos antes a 12 minutos después (tendencia a quedarse un poco más)
+- Los horarios se recalculan automáticamente cada día
 
 ### ❌ Días Excluidos
 - **Domingos** - No laboral
@@ -145,6 +152,12 @@ class HorarioConfig:
     ENTRADA_SABADO_MINUTO = 0
     SALIDA_SABADO_HORA = 13      # Hora de salida sábado (1 PM)
     SALIDA_SABADO_MINUTO = 0
+    
+    # Variación aleatoria (en minutos) - Comportamiento humano realista
+    VARIACION_ENTRADA_MIN = -2   # Ocasionalmente llega 2 min antes
+    VARIACION_ENTRADA_MAX = 8    # o hasta 8 min tarde
+    VARIACION_SALIDA_MIN = -3    # Ocasionalmente sale 3 min antes
+    VARIACION_SALIDA_MAX = 12    # o hasta 12 min tarde (más común)
 ```
 
 ## 🖥️ Ejecución Permanente (24/7)
