@@ -285,27 +285,8 @@ def job_listener(event):
     else:
         logger.debug(f"✅ Trabajo completado: {event.job_id}")
 
-def main():
-    """Función principal del programador"""
-    logger.info("\n" + "=" * 80)
-    logger.info("🚀 INICIANDO PROGRAMADOR DE MARCAJES GEOVICTORIA")
-    logger.info("📍 Configurado para Colombia (incluye manejo de festivos)")
-    logger.info("=" * 80)
-    
-    # Mostrar festivos del año actual
-    año_actual = datetime.now().year
-    listar_festivos_año(año_actual)
-    
-    # Verificar si hay marcajes pendientes (PC iniciado tarde)
-    verificar_marcajes_pendientes()
-    
-    # Crear scheduler
-    scheduler = BlockingScheduler(timezone='America/Bogota')
-    
-    # Agregar listener para eventos
-    scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
-    
-    # Configurar trabajos programados con horarios aleatorios
+def configurar_trabajos_diarios(scheduler):
+    """Configura los trabajos con horarios aleatorios para el día actual"""
     logger.info("\n🎲 CALCULANDO HORARIOS ALEATORIOS PARA HOY:")
     logger.info("=" * 80)
     
@@ -316,6 +297,13 @@ def main():
         HorarioConfig.VARIACION_ENTRADA_MIN,
         HorarioConfig.VARIACION_ENTRADA_MAX
     )
+    
+    # Eliminar job anterior si existe
+    try:
+        scheduler.remove_job('entrada_semana')
+    except:
+        pass
+    
     scheduler.add_job(
         lambda: entrada_semana_con_variacion(var_entrada_semana),
         CronTrigger(
@@ -338,6 +326,13 @@ def main():
         HorarioConfig.VARIACION_SALIDA_MIN,
         HorarioConfig.VARIACION_SALIDA_MAX
     )
+    
+    # Eliminar job anterior si existe
+    try:
+        scheduler.remove_job('salida_semana')
+    except:
+        pass
+    
     scheduler.add_job(
         lambda: salida_semana_con_variacion(var_salida_semana),
         CronTrigger(
@@ -360,6 +355,13 @@ def main():
         HorarioConfig.VARIACION_ENTRADA_MIN,
         HorarioConfig.VARIACION_ENTRADA_MAX
     )
+    
+    # Eliminar job anterior si existe
+    try:
+        scheduler.remove_job('entrada_sabado')
+    except:
+        pass
+    
     scheduler.add_job(
         lambda: entrada_sabado_con_variacion(var_entrada_sabado),
         CronTrigger(
@@ -382,6 +384,13 @@ def main():
         HorarioConfig.VARIACION_SALIDA_MIN,
         HorarioConfig.VARIACION_SALIDA_MAX
     )
+    
+    # Eliminar job anterior si existe
+    try:
+        scheduler.remove_job('salida_sabado')
+    except:
+        pass
+    
     scheduler.add_job(
         lambda: salida_sabado_con_variacion(var_salida_sabado),
         CronTrigger(
@@ -396,6 +405,73 @@ def main():
         coalesce=True
     )
     logger.info("=" * 80)
+
+def reconfigurar_horarios_diarios():
+    """Función que se ejecuta a medianoche para recalcular los horarios del día"""
+    logger.info("\n" + "🌙" * 40)
+    logger.info("🔄 RECONFIGURANDO HORARIOS PARA NUEVO DÍA")
+    logger.info("🌙" * 40)
+    
+    # Obtener referencia al scheduler desde el ámbito global
+    global scheduler_global
+    configurar_trabajos_diarios(scheduler_global)
+    
+    # Mostrar trabajos actualizados
+    logger.info("\n📋 TRABAJOS ACTUALIZADOS:")
+    logger.info("=" * 80)
+    for job in scheduler_global.get_jobs():
+        if job.id != 'reconfigurar_diario':  # No mostrar el job de reconfiguración
+            try:
+                next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else 'N/A'
+            except AttributeError:
+                next_run = 'Información no disponible'
+            logger.info(f"  ✓ {job.name:25} | Próxima ejecución: {next_run}")
+    logger.info("=" * 80)
+    logger.info("✅ Reconfiguración completada\n")
+
+# Variable global para el scheduler
+scheduler_global = None
+
+def main():
+    """Función principal del programador"""
+    global scheduler_global
+    
+    logger.info("\n" + "=" * 80)
+    logger.info("🚀 INICIANDO PROGRAMADOR DE MARCAJES GEOVICTORIA")
+    logger.info("📍 Configurado para Colombia (incluye manejo de festivos)")
+    logger.info("=" * 80)
+    
+    # Mostrar festivos del año actual
+    año_actual = datetime.now().year
+    listar_festivos_año(año_actual)
+    
+    # Verificar si hay marcajes pendientes (PC iniciado tarde)
+    verificar_marcajes_pendientes()
+    
+    # Crear scheduler
+    scheduler = BlockingScheduler(timezone='America/Bogota')
+    scheduler_global = scheduler
+    
+    # Agregar listener para eventos
+    scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+    
+    # Configurar trabajos iniciales
+    configurar_trabajos_diarios(scheduler)
+    
+    # Agregar job que reconfigura los horarios cada día a medianoche
+    scheduler.add_job(
+        reconfigurar_horarios_diarios,
+        CronTrigger(
+            hour=0,
+            minute=1,
+            timezone='America/Bogota'
+        ),
+        id='reconfigurar_diario',
+        name='Reconfiguración diaria de horarios',
+        max_instances=1,
+        coalesce=True
+    )
+    logger.info("🔄 Job de reconfiguración diaria agregado (00:01 cada día)")
     
     # Mostrar trabajos programados
     logger.info("\n📋 TRABAJOS PROGRAMADOS:")
@@ -413,10 +489,10 @@ def main():
     logger.info("  • Domingos: EXCLUIDOS (no se ejecuta)")
     logger.info("  • Festivos Colombia: EXCLUIDOS (validación automática)")
     logger.info("  • Zona horaria: America/Bogota")
-    logger.info("  • Horarios aleatorios: ACTIVADOS")
+    logger.info("  • Horarios aleatorios: ACTIVADOS (se recalculan cada día a las 00:01)")
     logger.info(f"    - Entrada: {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} minutos")
     logger.info(f"    - Salida: {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} minutos")
-    logger.info("  • Nota: Los horarios se recalculan cada día automáticamente")
+    logger.info("  • Recuperación automática: SI (ejecuta marcajes pendientes)")
     logger.info("=" * 80)
     
     logger.info("\n⏰ Programador activo. Presione Ctrl+C para detener.\n")
