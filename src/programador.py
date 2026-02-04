@@ -139,17 +139,22 @@ def determinar_tipo_marcaje(accion: str, dia_semana: int) -> str:
         else:
             return "SALIDA SEMANA (L-V)"
 
-def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 0):
+def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 0, validar_horario: bool = True):
     """
-    Ejecutar marcaje solo si es día laborable (no festivo ni domingo)
-    Registra la acción REAL ejecutada, no la esperada
+    Ejecutar marcaje solo si es día laborable, horario correcto y acción esperada coincide
+    
+    Args:
+        tipo_marcaje: Tipo esperado (ENTRADA SEMANA, SALIDA SEMANA, etc.)
+        variacion_minutos: Variación aleatoria aplicada
+        validar_horario: Si True, valida que sea el horario apropiado para el tipo de marcaje
     """
     hoy = date.today()
+    ahora = datetime.now()
     
     logger.info("=" * 80)
     logger.info(f"🔔 Intento de marcaje programado: {tipo_marcaje}")
     logger.info(f"📅 Fecha: {hoy.strftime('%A, %d de %B de %Y')}")
-    logger.info(f"🕐 Hora: {datetime.now().strftime('%H:%M:%S')}")
+    logger.info(f"🕐 Hora: {ahora.strftime('%H:%M:%S')}")
     if variacion_minutos != 0:
         logger.info(f"🎲 Variación aleatoria: {variacion_minutos:+d} minutos")
     
@@ -169,12 +174,44 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
     if hoy.weekday() == 5:
         logger.info(f"📅 Hoy es sábado - Horario especial activo")
     
-    # Si llegamos aquí, es día laborable
-    logger.info(f"✅ Día laborable confirmado - Ejecutando {tipo_marcaje}...")
+    # Determinar acción esperada y horarios
+    if "ENTRADA" in tipo_marcaje:
+        accion_esperada = "Entrada"
+        if hoy.weekday() == 5:  # Sábado
+            hora_programada = time(HorarioConfig.ENTRADA_SABADO_HORA, HorarioConfig.ENTRADA_SABADO_MINUTO)
+        else:
+            hora_programada = time(HorarioConfig.ENTRADA_SEMANA_HORA, HorarioConfig.ENTRADA_SEMANA_MINUTO)
+    else:  # SALIDA
+        accion_esperada = "Salida"
+        if hoy.weekday() == 5:  # Sábado
+            hora_programada = time(HorarioConfig.SALIDA_SABADO_HORA, HorarioConfig.SALIDA_SABADO_MINUTO)
+        else:
+            hora_programada = time(HorarioConfig.SALIDA_SEMANA_HORA, HorarioConfig.SALIDA_SEMANA_MINUTO)
+    
+    # Validar horario si está habilitado
+    if validar_horario:
+        hora_actual = ahora.time()
+        # Permitir marcaje si estamos en la hora programada +/- 30 minutos
+        hora_min = (datetime.combine(hoy, hora_programada) - timedelta(minutes=30)).time()
+        hora_max = (datetime.combine(hoy, hora_programada) + timedelta(minutes=30)).time()
+        
+        if not (hora_min <= hora_actual <= hora_max):
+            logger.warning(f"⏰ FUERA DE HORARIO")
+            logger.warning(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+            logger.warning(f"   • Hora programada: {hora_programada.strftime('%H:%M')}")
+            logger.warning(f"   • Ventana permitida: {hora_min.strftime('%H:%M')} - {hora_max.strftime('%H:%M')}")
+            logger.warning(f"   • NO se ejecutará {tipo_marcaje}")
+            logger.info("=" * 80)
+            return None
+        
+        logger.info(f"✅ Horario válido para {accion_esperada}")
+    
+    # Si llegamos aquí, es día laborable y horario correcto
+    logger.info(f"✅ Validaciones OK - Ejecutando {tipo_marcaje}...")
     
     try:
-        # Ejecutar el marcaje y obtener la acción REAL ejecutada
-        accion_ejecutada = asyncio.run(run())
+        # Ejecutar el marcaje CON VALIDACIÓN de acción esperada
+        accion_ejecutada = asyncio.run(run(accion_esperada=accion_esperada))
         
         if accion_ejecutada:
             logger.info(f"✅ Marcaje completado: {accion_ejecutada}")
@@ -285,7 +322,8 @@ def verificar_marcajes_pendientes():
                     logger.info(f"   • Re-ejecutando marcaje de entrada...")
                     logger.info("=" * 80)
                     
-                    ejecutar_marcaje_con_validacion(tipo_entrada)
+                    # NO validar horario en corrección de inconsistencias
+                    ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
                     marcajes_ejecutados += 1
                 else:
                     logger.info(f"✅ Estado confirmado: {boton_disponible or 'Ningún botón'} disponible")
@@ -299,7 +337,8 @@ def verificar_marcajes_pendientes():
             logger.info("   • Ejecutando marcaje pendiente...")
             logger.info("=" * 80)
             
-            ejecutar_marcaje_con_validacion(tipo_entrada)
+            # NO validar horario en marcajes pendientes por PC encendido tarde
+            ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
             marcajes_ejecutados += 1
     else:
         logger.info(f"⏰ Aún no es hora de marcar entrada (programado: {hora_entrada.strftime('%H:%M')})")
@@ -314,7 +353,8 @@ def verificar_marcajes_pendientes():
             logger.info("   • Ejecutando marcaje pendiente...")
             logger.info("=" * 80)
             
-            ejecutar_marcaje_con_validacion(tipo_salida)
+            # NO validar horario en marcajes pendientes
+            ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
             marcajes_ejecutados += 1
         else:
             logger.info(f"✅ {tipo_salida} ya fue ejecutado hoy")

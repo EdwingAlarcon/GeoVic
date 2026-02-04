@@ -205,8 +205,13 @@ async def verificar_estado():
     
     return boton_disponible
 
-async def run():
-    """Función principal con manejo completo de errores"""
+async def run(accion_esperada=None):
+    """Función principal con manejo completo de errores
+    
+    Args:
+        accion_esperada: "Entrada" o "Salida". Si se especifica, solo ejecuta si coincide.
+                        Si es None, ejecuta lo que esté disponible (modo manual).
+    """
     browser = None
     accion = None
     
@@ -216,6 +221,8 @@ async def run():
         logger.info("=" * 60)
         logger.info(f"Iniciando marcaje automático GeoVictoria")
         logger.info(f"Usuario: {usuario}")
+        if accion_esperada:
+            logger.info(f"Acción esperada: {accion_esperada}")
         logger.info("=" * 60)
         
         # Iniciar navegador
@@ -236,6 +243,21 @@ async def run():
             if not target_frame:
                 logger.error("❌ No se pudo encontrar el iframe después de varios intentos")
                 return None
+            
+            # Si se especifica acción esperada, validar primero
+            if accion_esperada:
+                boton_disponible = await verificar_boton_disponible(target_frame)
+                
+                if boton_disponible != accion_esperada:
+                    logger.warning("=" * 60)
+                    logger.warning(f"⚠️ VALIDACIÓN FALLIDA")
+                    logger.warning(f"   • Acción esperada: {accion_esperada}")
+                    logger.warning(f"   • Botón disponible: {boton_disponible or 'Ninguno'}")
+                    logger.warning(f"   • NO se ejecutará el marcaje")
+                    logger.warning("=" * 60)
+                    return None
+                
+                logger.info(f"✅ Validación OK: Botón '{boton_disponible}' disponible")
             
             # Marcar asistencia
             accion = await marcar_asistencia(target_frame)
