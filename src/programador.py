@@ -315,16 +315,23 @@ def verificar_marcajes_pendientes():
                 boton_disponible = asyncio.run(verificar_estado())
                 
                 if boton_disponible == "Entrada":
-                    logger.warning(f"⚠️ INCONSISTENCIA DETECTADA!")
-                    logger.warning(f"   • Registro local indica: {tipo_entrada} ejecutado")
-                    logger.warning(f"   • Estado real GeoVictoria: Botón 'Marcar Entrada' disponible")
-                    logger.warning(f"   • Posible salida accidental registrada")
-                    logger.info(f"   • Re-ejecutando marcaje de entrada...")
-                    logger.info("=" * 80)
-                    
-                    # NO validar horario en corrección de inconsistencias
-                    ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
-                    marcajes_ejecutados += 1
+                    # Solo re-ejecutar entrada si NO se ha registrado también la salida;
+                    # después de una salida correcta, el sitio normalmente muestra
+                    # el botón 'Marcar Entrada' (estado esperado), por lo que no
+                    # debemos considerar esto como una inconsistencia.
+                    if not ya_se_ejecuto_hoy(tipo_salida):
+                        logger.warning(f"⚠️ INCONSISTENCIA DETECTADA!")
+                        logger.warning(f"   • Registro local indica: {tipo_entrada} ejecutado")
+                        logger.warning(f"   • Estado real GeoVictoria: Botón 'Marcar Entrada' disponible")
+                        logger.warning(f"   • Posible salida accidental registrada")
+                        logger.info(f"   • Re-ejecutando marcaje de entrada...")
+                        logger.info("=" * 80)
+
+                        # NO validar horario en corrección de inconsistencias
+                        ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
+                        marcajes_ejecutados += 1
+                    else:
+                        logger.info("✅ Estado consistente: Entrada y Salida ya registrados; no se re-ejecutará entrada")
                 else:
                     logger.info(f"✅ Estado confirmado: {boton_disponible or 'Ningún botón'} disponible")
             except Exception as e:
@@ -357,7 +364,34 @@ def verificar_marcajes_pendientes():
             ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
             marcajes_ejecutados += 1
         else:
-            logger.info(f"✅ {tipo_salida} ya fue ejecutado hoy")
+            logger.info(f"✅ {tipo_salida} ya fue ejecutado hoy (según registro local)")
+            
+            # Verificar estado real en GeoVictoria
+            logger.info("🔍 Verificando estado real en GeoVictoria...")
+            try:
+                boton_disponible = asyncio.run(verificar_estado())
+                
+                if boton_disponible == "Salida":
+                    # Solo re-ejecutar salida si NO se completó el ciclo completo del día
+                    # (entrada -> salida). Si solo hay ENTRADA sin SALIDA, es legítimo
+                    # que aparezca el botón "Marcar Salida".
+                    if ya_se_ejecuto_hoy(tipo_entrada):
+                        logger.warning(f"⚠️ INCONSISTENCIA DETECTADA!")
+                        logger.warning(f"   • Registro local indica: {tipo_salida} ejecutado")
+                        logger.warning(f"   • Estado real GeoVictoria: Botón 'Marcar Salida' disponible")
+                        logger.warning(f"   • Posible entrada accidental posterior a salida")
+                        logger.info(f"   • Re-ejecutando marcaje de salida...")
+                        logger.info("=" * 80)
+                        
+                        # NO validar horario en corrección de inconsistencias
+                        ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
+                        marcajes_ejecutados += 1
+                    else:
+                        logger.info("✅ Estado inesperado: Salida registrada pero sin entrada previa; no se re-ejecutará")
+                else:
+                    logger.info(f"✅ Estado confirmado: {boton_disponible or 'Ningún botón'} disponible")
+            except Exception as e:
+                logger.error(f"❌ Error verificando estado: {e}")
     else:
         logger.info(f"⏰ Aún no es hora de marcar salida (programado: {hora_salida.strftime('%H:%M')})")
     
