@@ -16,7 +16,7 @@ from pathlib import Path
 # Agregar el directorio raíz al path para importaciones
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.geovictoria import run
+from src.geovictoria import run, verificar_estado
 from src.festivos_colombia import es_dia_laborable, es_festivo, listar_festivos_año
 
 # Configuración de logging y registro de ejecuciones
@@ -126,9 +126,23 @@ def ya_se_ejecuto_hoy(tipo_marcaje: str) -> bool:
     
     return False
 
+def determinar_tipo_marcaje(accion: str, dia_semana: int) -> str:
+    """Determina el tipo de marcaje basado en la acción real ejecutada y el día"""
+    if dia_semana == 5:  # Sábado
+        if accion == "Entrada":
+            return "ENTRADA SÁBADO"
+        else:
+            return "SALIDA SÁBADO"
+    else:  # Lunes a Viernes
+        if accion == "Entrada":
+            return "ENTRADA SEMANA (L-V)"
+        else:
+            return "SALIDA SEMANA (L-V)"
+
 def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 0):
     """
     Ejecutar marcaje solo si es día laborable (no festivo ni domingo)
+    Registra la acción REAL ejecutada, no la esperada
     """
     hoy = date.today()
     
@@ -143,13 +157,13 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
     if es_festivo(hoy):
         logger.warning(f"🎉 HOY ES FESTIVO - No se ejecutará el marcaje")
         logger.info("=" * 80)
-        return
+        return None
     
     # Verificar si es domingo
     if hoy.weekday() == 6:
         logger.warning(f"📅 HOY ES DOMINGO - No se ejecutará el marcaje")
         logger.info("=" * 80)
-        return
+        return None
     
     # Verificación adicional para sábados
     if hoy.weekday() == 5:
@@ -159,14 +173,27 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
     logger.info(f"✅ Día laborable confirmado - Ejecutando {tipo_marcaje}...")
     
     try:
-        asyncio.run(run())
-        logger.info(f"✅ {tipo_marcaje} completado exitosamente")
-        # Registrar la ejecución exitosa
-        guardar_registro_ejecucion(tipo_marcaje, variacion_minutos)
+        # Ejecutar el marcaje y obtener la acción REAL ejecutada
+        accion_ejecutada = asyncio.run(run())
+        
+        if accion_ejecutada:
+            logger.info(f"✅ Marcaje completado: {accion_ejecutada}")
+            
+            # Registrar la acción REAL ejecutada, no la esperada
+            tipo_real = determinar_tipo_marcaje(accion_ejecutada, hoy.weekday())
+            guardar_registro_ejecucion(tipo_real, variacion_minutos)
+            logger.info(f"💾 Registro guardado: {tipo_real}")
+            
+        else:
+            logger.warning(f"⚠️ No se pudo ejecutar marcaje")
+            
+        return accion_ejecutada
+        
     except Exception as e:
         logger.error(f"❌ Error ejecutando {tipo_marcaje}: {e}", exc_info=True)
-    
-    logger.info("=" * 80)
+        return None
+    finally:
+        logger.info("=" * 80)
 
 def entrada_semana():
     """Marcaje de entrada Lunes a Viernes"""
@@ -202,7 +229,7 @@ def salida_sabado_con_variacion(variacion_minutos):
     ejecutar_marcaje_con_validacion("SALIDA SÁBADO", variacion_minutos)
 
 def verificar_marcajes_pendientes():
-    """Verifica y ejecuta marcajes pendientes si el PC se inició tarde"""
+    """Verifica y ejecuta marcajes pendientes consultando el estado real de GeoVictoria"""
     hoy = date.today()
     ahora = datetime.now()
     dia_semana = hoy.weekday()
@@ -241,7 +268,30 @@ def verificar_marcajes_pendientes():
     
     # Verificar entrada pendiente
     if hora_actual > hora_entrada:
-        if not ya_se_ejecuto_hoy(tipo_entrada):
+        # Primero verificar si ya se registró localmente
+        if ya_se_ejecuto_hoy(tipo_entrada):
+            logger.info(f"✅ {tipo_entrada} ya fue ejecutado hoy (según registro local)")
+            
+            # NUEVA LÓGICA: Verificar estado real en GeoVictoria
+            logger.info("🔍 Verificando estado real en GeoVictoria...")
+            try:
+                boton_disponible = asyncio.run(verificar_estado())
+                
+                if boton_disponible == "Entrada":
+                    logger.warning(f"⚠️ INCONSISTENCIA DETECTADA!")
+                    logger.warning(f"   • Registro local indica: {tipo_entrada} ejecutado")
+                    logger.warning(f"   • Estado real GeoVictoria: Botón 'Marcar Entrada' disponible")
+                    logger.warning(f"   • Posible salida accidental registrada")
+                    logger.info(f"   • Re-ejecutando marcaje de entrada...")
+                    logger.info("=" * 80)
+                    
+                    ejecutar_marcaje_con_validacion(tipo_entrada)
+                    marcajes_ejecutados += 1
+                else:
+                    logger.info(f"✅ Estado confirmado: {boton_disponible or 'Ningún botón'} disponible")
+            except Exception as e:
+                logger.error(f"❌ Error verificando estado: {e}")
+        else:
             logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_entrada}")
             logger.info(f"   • Hora programada: {hora_entrada.strftime('%H:%M')}")
             logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
@@ -251,8 +301,6 @@ def verificar_marcajes_pendientes():
             
             ejecutar_marcaje_con_validacion(tipo_entrada)
             marcajes_ejecutados += 1
-        else:
-            logger.info(f"✅ {tipo_entrada} ya fue ejecutado hoy")
     else:
         logger.info(f"⏰ Aún no es hora de marcar entrada (programado: {hora_entrada.strftime('%H:%M')})")
     

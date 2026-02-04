@@ -98,6 +98,29 @@ async def login(page, usuario, password):
         logger.error(f"❌ Error durante login: {e}")
         return False
 
+async def verificar_boton_disponible(target_frame):
+    """Verifica qué botón está disponible sin ejecutar marcaje"""
+    try:
+        # Verificar si está disponible Marcar Entrada
+        btn_entry = target_frame.locator("text=Marcar Entrada")
+        await btn_entry.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.info("🔍 Botón disponible: Marcar Entrada")
+        return "Entrada"
+    except PlaywrightTimeoutError:
+        pass
+    
+    try:
+        # Verificar si está disponible Marcar Salida
+        btn_exit = target_frame.locator("text=Marcar Salida")
+        await btn_exit.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.info("🔍 Botón disponible: Marcar Salida")
+        return "Salida"
+    except PlaywrightTimeoutError:
+        pass
+    
+    logger.warning("🔍 Ningún botón de marcaje disponible")
+    return None
+
 async def marcar_asistencia(target_frame):
     """Intenta marcar entrada o salida con validación"""
     accion = None
@@ -143,9 +166,49 @@ async def marcar_asistencia(target_frame):
     
     return accion
 
+async def verificar_estado():
+    """Verifica qué botón está disponible en GeoVictoria sin ejecutar marcaje"""
+    browser = None
+    boton_disponible = None
+    
+    try:
+        # Obtener credenciales
+        usuario, password = get_credentials()
+        logger.info("🔍 Verificando estado actual en GeoVictoria...")
+        
+        # Iniciar navegador
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)  # Siempre headless para verificación
+            context = await browser.new_context()
+            page = await context.new_page()
+            
+            # Login
+            if not await login(page, usuario, password):
+                logger.error("❌ Fallo en el proceso de login")
+                return None
+            
+            # Buscar iframe
+            target_frame = await wait_for_iframe(page, max_retries=Config.MAX_RETRIES)
+            
+            if not target_frame:
+                logger.error("❌ No se pudo encontrar el iframe")
+                return None
+            
+            # Verificar qué botón está disponible
+            boton_disponible = await verificar_boton_disponible(target_frame)
+            
+    except Exception as e:
+        logger.error(f"❌ Error verificando estado: {e}")
+    finally:
+        if browser:
+            await browser.close()
+    
+    return boton_disponible
+
 async def run():
     """Función principal con manejo completo de errores"""
     browser = None
+    accion = None
     
     try:
         # Obtener credenciales
@@ -165,14 +228,14 @@ async def run():
             # Login
             if not await login(page, usuario, password):
                 logger.error("❌ Fallo en el proceso de login")
-                return
+                return None
             
             # Buscar iframe con reintentos
             target_frame = await wait_for_iframe(page, max_retries=Config.MAX_RETRIES)
             
             if not target_frame:
                 logger.error("❌ No se pudo encontrar el iframe después de varios intentos")
-                return
+                return None
             
             # Marcar asistencia
             accion = await marcar_asistencia(target_frame)
@@ -198,7 +261,8 @@ async def run():
     finally:
         if browser:
             await browser.close()
-            logger.info("Navegador cerrado")
+    
+    return accion
 
 if __name__ == "__main__":
     asyncio.run(run())
