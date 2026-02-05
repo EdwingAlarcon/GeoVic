@@ -25,15 +25,23 @@ log_dir.mkdir(exist_ok=True)
 log_file = log_dir / f"programador_{datetime.now().strftime('%Y%m%d')}.log"
 registro_file = log_dir / "registro_ejecuciones.json"
 
+# Configurar logging con manejo robusto para Task Scheduler
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+        logging.FileHandler(log_file, encoding='utf-8', mode='a'),
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True  # Asegurar que se reconfigure el logging
 )
 logger = logging.getLogger(__name__)
+
+# Log inicial para confirmar que el logging funciona
+logger.info(f"=" * 80)
+logger.info(f"📝 Sistema de logging inicializado")
+logger.info(f"📁 Archivo de log: {log_file}")
+logger.info(f"=" * 80)
 
 # Configuración de horarios
 class HorarioConfig:
@@ -561,6 +569,8 @@ def main():
     logger.info("\n" + "=" * 80)
     logger.info("🚀 INICIANDO PROGRAMADOR DE MARCAJES GEOVICTORIA")
     logger.info("📍 Configurado para Colombia (incluye manejo de festivos)")
+    logger.info(f"💻 Ejecutado desde: {Path(__file__).parent.parent}")
+    logger.info(f"⏰ Hora de inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 80)
     
     # Mostrar festivos del año actual
@@ -568,6 +578,7 @@ def main():
     listar_festivos_año(año_actual)
     
     # Verificar si hay marcajes pendientes (PC iniciado tarde)
+    logger.info("\n🔍 Verificando marcajes pendientes del día...")
     verificar_marcajes_pendientes()
     
     # Crear scheduler
