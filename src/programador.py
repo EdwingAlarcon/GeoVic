@@ -241,36 +241,68 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
         logger.info("=" * 80)
 
 def entrada_semana():
-    """Marcaje de entrada Lunes a Viernes"""
-    ejecutar_marcaje_con_validacion("ENTRADA SEMANA (L-V)")
-
-def salida_semana():
-    """Marcaje de salida Lunes a Viernes"""
-    ejecutar_marcaje_con_validacion("SALIDA SEMANA (L-V)")
-
-def entrada_sabado():
-    """Marcaje de entrada Sábados"""
-    ejecutar_marcaje_con_validacion("ENTRADA SÁBADO")
-
-def salida_sabado():
-    """Marcaje de salida Sábados"""
-    ejecutar_marcaje_con_validacion("SALIDA SÁBADO")
-
-# Versiones con variación aleatoria
-def entrada_semana_con_variacion(variacion_minutos):
-    """Marcaje de entrada Lunes a Viernes con variación aleatoria"""
+    """Marcaje de entrada Lunes a Viernes con variación aleatoria calculada al ejecutar"""
+    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
+    variacion_minutos = random.randint(HorarioConfig.VARIACION_ENTRADA_MIN, HorarioConfig.VARIACION_ENTRADA_MAX)
+    logger.info(f"🎲 Variación calculada para entrada: {variacion_minutos:+d} minutos")
+    
+    # Esperar la variación antes de ejecutar
+    if variacion_minutos > 0:
+        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar entrada...")
+        import time
+        time.sleep(variacion_minutos * 60)
+    elif variacion_minutos < 0:
+        # Variación negativa ya fue aplicada por programarse antes
+        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
+    
     ejecutar_marcaje_con_validacion("ENTRADA SEMANA (L-V)", variacion_minutos)
 
-def salida_semana_con_variacion(variacion_minutos):
-    """Marcaje de salida Lunes a Viernes con variación aleatoria"""
+def salida_semana():
+    """Marcaje de salida Lunes a Viernes con variación aleatoria calculada al ejecutar"""
+    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
+    variacion_minutos = random.randint(HorarioConfig.VARIACION_SALIDA_MIN, HorarioConfig.VARIACION_SALIDA_MAX)
+    logger.info(f"🎲 Variación calculada para salida: {variacion_minutos:+d} minutos")
+    
+    # Esperar la variación antes de ejecutar
+    if variacion_minutos > 0:
+        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar salida...")
+        import time
+        time.sleep(variacion_minutos * 60)
+    elif variacion_minutos < 0:
+        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
+    
     ejecutar_marcaje_con_validacion("SALIDA SEMANA (L-V)", variacion_minutos)
 
-def entrada_sabado_con_variacion(variacion_minutos):
-    """Marcaje de entrada Sábados con variación aleatoria"""
+def entrada_sabado():
+    """Marcaje de entrada Sábados con variación aleatoria calculada al ejecutar"""
+    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
+    variacion_minutos = random.randint(HorarioConfig.VARIACION_ENTRADA_MIN, HorarioConfig.VARIACION_ENTRADA_MAX)
+    logger.info(f"🎲 Variación calculada para entrada sábado: {variacion_minutos:+d} minutos")
+    
+    # Esperar la variación antes de ejecutar
+    if variacion_minutos > 0:
+        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar entrada...")
+        import time
+        time.sleep(variacion_minutos * 60)
+    elif variacion_minutos < 0:
+        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
+    
     ejecutar_marcaje_con_validacion("ENTRADA SÁBADO", variacion_minutos)
 
-def salida_sabado_con_variacion(variacion_minutos):
-    """Marcaje de salida Sábados con variación aleatoria"""
+def salida_sabado():
+    """Marcaje de salida Sábados con variación aleatoria calculada al ejecutar"""
+    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
+    variacion_minutos = random.randint(HorarioConfig.VARIACION_SALIDA_MIN, HorarioConfig.VARIACION_SALIDA_MAX)
+    logger.info(f"🎲 Variación calculada para salida sábado: {variacion_minutos:+d} minutos")
+    
+    # Esperar la variación antes de ejecutar
+    if variacion_minutos > 0:
+        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar salida...")
+        import time
+        time.sleep(variacion_minutos * 60)
+    elif variacion_minutos < 0:
+        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
+    
     ejecutar_marcaje_con_validacion("SALIDA SÁBADO", variacion_minutos)
 
 def verificar_marcajes_pendientes():
@@ -415,149 +447,91 @@ def job_listener(event):
     else:
         logger.debug(f"✅ Trabajo completado: {event.job_id}")
 
-def configurar_trabajos_diarios(scheduler):
-    """Configura los trabajos con horarios aleatorios para el día actual"""
-    logger.info("\n🎲 CALCULANDO HORARIOS ALEATORIOS PARA HOY:")
+def configurar_trabajos_fijos(scheduler):
+    """Configura los trabajos con horarios fijos - la variación se aplica al ejecutar"""
+    logger.info("\n📅 CONFIGURANDO HORARIOS BASE:")
     logger.info("=" * 80)
     
-    # LUNES A VIERNES - ENTRADA con variación aleatoria
-    entrada_semana_time, var_entrada_semana = calcular_horario_aleatorio(
-        HorarioConfig.ENTRADA_SEMANA_HORA,
-        HorarioConfig.ENTRADA_SEMANA_MINUTO,
-        HorarioConfig.VARIACION_ENTRADA_MIN,
-        HorarioConfig.VARIACION_ENTRADA_MAX
-    )
-    
-    # Eliminar job anterior si existe
-    try:
-        scheduler.remove_job('entrada_semana')
-    except:
-        pass
-    
+    # LUNES A VIERNES - ENTRADA (horario base fijo, variación se aplica al ejecutar)
     scheduler.add_job(
-        lambda: entrada_semana_con_variacion(var_entrada_semana),
+        entrada_semana,
         CronTrigger(
             day_of_week='mon-fri',
-            hour=entrada_semana_time.hour,
-            minute=entrada_semana_time.minute,
+            hour=HorarioConfig.ENTRADA_SEMANA_HORA,
+            minute=HorarioConfig.ENTRADA_SEMANA_MINUTO,
             timezone='America/Bogota'
         ),
         id='entrada_semana',
-        name=f'Entrada L-V {entrada_semana_time.strftime("%H:%M")}',
+        name=f'Entrada L-V {HorarioConfig.ENTRADA_SEMANA_HORA:02d}:{HorarioConfig.ENTRADA_SEMANA_MINUTO:02d}',
         max_instances=1,
         coalesce=True
     )
-    logger.info("")
+    logger.info(f"  ✓ Entrada L-V programada: {HorarioConfig.ENTRADA_SEMANA_HORA:02d}:{HorarioConfig.ENTRADA_SEMANA_MINUTO:02d}")
     
-    # LUNES A VIERNES - SALIDA con variación aleatoria
-    salida_semana_time, var_salida_semana = calcular_horario_aleatorio(
-        HorarioConfig.SALIDA_SEMANA_HORA,
-        HorarioConfig.SALIDA_SEMANA_MINUTO,
-        HorarioConfig.VARIACION_SALIDA_MIN,
-        HorarioConfig.VARIACION_SALIDA_MAX
-    )
-    
-    # Eliminar job anterior si existe
-    try:
-        scheduler.remove_job('salida_semana')
-    except:
-        pass
-    
+    # LUNES A VIERNES - SALIDA (horario base fijo, variación se aplica al ejecutar)
     scheduler.add_job(
-        lambda: salida_semana_con_variacion(var_salida_semana),
+        salida_semana,
         CronTrigger(
             day_of_week='mon-fri',
-            hour=salida_semana_time.hour,
-            minute=salida_semana_time.minute,
+            hour=HorarioConfig.SALIDA_SEMANA_HORA,
+            minute=HorarioConfig.SALIDA_SEMANA_MINUTO,
             timezone='America/Bogota'
         ),
         id='salida_semana',
-        name=f'Salida L-V {salida_semana_time.strftime("%H:%M")}',
+        name=f'Salida L-V {HorarioConfig.SALIDA_SEMANA_HORA:02d}:{HorarioConfig.SALIDA_SEMANA_MINUTO:02d}',
         max_instances=1,
         coalesce=True
     )
-    logger.info("")
+    logger.info(f"  ✓ Salida L-V programada: {HorarioConfig.SALIDA_SEMANA_HORA:02d}:{HorarioConfig.SALIDA_SEMANA_MINUTO:02d}")
     
-    # SÁBADOS - ENTRADA con variación aleatoria
-    entrada_sabado_time, var_entrada_sabado = calcular_horario_aleatorio(
-        HorarioConfig.ENTRADA_SABADO_HORA,
-        HorarioConfig.ENTRADA_SABADO_MINUTO,
-        HorarioConfig.VARIACION_ENTRADA_MIN,
-        HorarioConfig.VARIACION_ENTRADA_MAX
-    )
-    
-    # Eliminar job anterior si existe
-    try:
-        scheduler.remove_job('entrada_sabado')
-    except:
-        pass
-    
+    # SÁBADOS - ENTRADA (horario base fijo, variación se aplica al ejecutar)
     scheduler.add_job(
-        lambda: entrada_sabado_con_variacion(var_entrada_sabado),
+        entrada_sabado,
         CronTrigger(
             day_of_week='sat',
-            hour=entrada_sabado_time.hour,
-            minute=entrada_sabado_time.minute,
+            hour=HorarioConfig.ENTRADA_SABADO_HORA,
+            minute=HorarioConfig.ENTRADA_SABADO_MINUTO,
             timezone='America/Bogota'
         ),
         id='entrada_sabado',
-        name=f'Entrada Sábado {entrada_sabado_time.strftime("%H:%M")}',
+        name=f'Entrada Sábado {HorarioConfig.ENTRADA_SABADO_HORA:02d}:{HorarioConfig.ENTRADA_SABADO_MINUTO:02d}',
         max_instances=1,
         coalesce=True
     )
-    logger.info("")
+    logger.info(f"  ✓ Entrada Sábado programada: {HorarioConfig.ENTRADA_SABADO_HORA:02d}:{HorarioConfig.ENTRADA_SABADO_MINUTO:02d}")
     
-    # SÁBADOS - SALIDA con variación aleatoria
-    salida_sabado_time, var_salida_sabado = calcular_horario_aleatorio(
-        HorarioConfig.SALIDA_SABADO_HORA,
-        HorarioConfig.SALIDA_SABADO_MINUTO,
-        HorarioConfig.VARIACION_SALIDA_MIN,
-        HorarioConfig.VARIACION_SALIDA_MAX
-    )
-    
-    # Eliminar job anterior si existe
-    try:
-        scheduler.remove_job('salida_sabado')
-    except:
-        pass
-    
+    # SÁBADOS - SALIDA (horario base fijo, variación se aplica al ejecutar)
     scheduler.add_job(
-        lambda: salida_sabado_con_variacion(var_salida_sabado),
+        salida_sabado,
         CronTrigger(
             day_of_week='sat',
-            hour=salida_sabado_time.hour,
-            minute=salida_sabado_time.minute,
+            hour=HorarioConfig.SALIDA_SABADO_HORA,
+            minute=HorarioConfig.SALIDA_SABADO_MINUTO,
             timezone='America/Bogota'
         ),
         id='salida_sabado',
-        name=f'Salida Sábado {salida_sabado_time.strftime("%H:%M")}',
+        name=f'Salida Sábado {HorarioConfig.SALIDA_SABADO_HORA:02d}:{HorarioConfig.SALIDA_SABADO_MINUTO:02d}',
         max_instances=1,
         coalesce=True
     )
-    logger.info("=" * 80)
-
-def reconfigurar_horarios_diarios():
-    """Función que se ejecuta a medianoche para recalcular los horarios del día"""
-    logger.info("\n" + "🌙" * 40)
-    logger.info("🔄 RECONFIGURANDO HORARIOS PARA NUEVO DÍA")
-    logger.info("🌙" * 40)
+    logger.info(f"  ✓ Salida Sábado programada: {HorarioConfig.SALIDA_SABADO_HORA:02d}:{HorarioConfig.SALIDA_SABADO_MINUTO:02d}")
     
-    # Obtener referencia al scheduler desde el ámbito global
-    global scheduler_global
-    configurar_trabajos_diarios(scheduler_global)
+    # VERIFICACIÓN PERIÓDICA cada hora
+    scheduler.add_job(
+        verificar_marcajes_pendientes,
+        CronTrigger(
+            minute=0,  # En punto cada hora
+            timezone='America/Bogota'
+        ),
+        id='verificacion_periodica',
+        name='Verificación periódica (cada hora)',
+        max_instances=1,
+        coalesce=True
+    )
+    logger.info(f"  ✓ Verificación periódica: Cada hora en punto")
     
-    # Mostrar trabajos actualizados
-    logger.info("\n📋 TRABAJOS ACTUALIZADOS:")
     logger.info("=" * 80)
-    for job in scheduler_global.get_jobs():
-        if job.id != 'reconfigurar_diario':  # No mostrar el job de reconfiguración
-            try:
-                next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else 'N/A'
-            except AttributeError:
-                next_run = 'Información no disponible'
-            logger.info(f"  ✓ {job.name:25} | Próxima ejecución: {next_run}")
-    logger.info("=" * 80)
-    logger.info("✅ Reconfiguración completada\n")
+    logger.info("💡 Nota: La variación aleatoria se aplica al momento de ejecutar cada marcaje")
 
 # Variable global para el scheduler
 scheduler_global = None
@@ -588,23 +562,8 @@ def main():
     # Agregar listener para eventos
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     
-    # Configurar trabajos iniciales
-    configurar_trabajos_diarios(scheduler)
-    
-    # Agregar job que reconfigura los horarios cada día a medianoche
-    scheduler.add_job(
-        reconfigurar_horarios_diarios,
-        CronTrigger(
-            hour=0,
-            minute=1,
-            timezone='America/Bogota'
-        ),
-        id='reconfigurar_diario',
-        name='Reconfiguración diaria de horarios',
-        max_instances=1,
-        coalesce=True
-    )
-    logger.info("🔄 Job de reconfiguración diaria agregado (00:01 cada día)")
+    # Configurar trabajos con horarios fijos
+    configurar_trabajos_fijos(scheduler)
     
     # Mostrar trabajos programados
     logger.info("\n📋 TRABAJOS PROGRAMADOS:")
@@ -622,10 +581,13 @@ def main():
     logger.info("  • Domingos: EXCLUIDOS (no se ejecuta)")
     logger.info("  • Festivos Colombia: EXCLUIDOS (validación automática)")
     logger.info("  • Zona horaria: America/Bogota")
-    logger.info("  • Horarios aleatorios: ACTIVADOS (se recalculan cada día a las 00:01)")
-    logger.info(f"    - Entrada: {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} minutos")
-    logger.info(f"    - Salida: {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} minutos")
-    logger.info("  • Recuperación automática: SI (ejecuta marcajes pendientes)")
+    logger.info("  • Horarios base: FIJOS (variación aleatoria se aplica al ejecutar)")
+    logger.info(f"    - Entrada L-V: {HorarioConfig.ENTRADA_SEMANA_HORA:02d}:{HorarioConfig.ENTRADA_SEMANA_MINUTO:02d} (± {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} min)")
+    logger.info(f"    - Salida L-V: {HorarioConfig.SALIDA_SEMANA_HORA:02d}:{HorarioConfig.SALIDA_SEMANA_MINUTO:02d} (± {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} min)")
+    logger.info(f"    - Entrada Sáb: {HorarioConfig.ENTRADA_SABADO_HORA:02d}:{HorarioConfig.ENTRADA_SABADO_MINUTO:02d} (± {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} min)")
+    logger.info(f"    - Salida Sáb: {HorarioConfig.SALIDA_SABADO_HORA:02d}:{HorarioConfig.SALIDA_SABADO_MINUTO:02d} (± {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} min)")
+    logger.info("  • Verificación periódica: CADA HORA (detecta y ejecuta marcajes pendientes)")
+    logger.info("  • Recuperación automática: SI (al inicio y cada hora)")
     logger.info("=" * 80)
     
     logger.info("\n⏰ Programador activo. Presione Ctrl+C para detener.\n")
