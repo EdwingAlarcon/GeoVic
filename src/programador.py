@@ -343,95 +343,79 @@ def verificar_marcajes_pendientes():
     
     marcajes_ejecutados = 0
     
+    # PROTECCIÓN: Si ambos marcajes ya se ejecutaron hoy, no hacer nada
+    if ya_se_ejecuto_hoy(tipo_entrada) and ya_se_ejecuto_hoy(tipo_salida):
+        logger.info(f"✅ Ambos marcajes completados hoy ({tipo_entrada} y {tipo_salida})")
+        logger.info("✅ No hay marcajes pendientes ni correcciones necesarias")
+        logger.info("=" * 80)
+        return
+    
     # Verificar entrada pendiente
     if hora_actual > hora_entrada:
         # Primero verificar si ya se registró localmente
         if ya_se_ejecuto_hoy(tipo_entrada):
             logger.info(f"✅ {tipo_entrada} ya fue ejecutado hoy (según registro local)")
-            
-            # NUEVA LÓGICA: Verificar estado real en GeoVictoria
-            logger.info("🔍 Verificando estado real en GeoVictoria...")
-            try:
-                boton_disponible = asyncio.run(verificar_estado())
-                
-                if boton_disponible == "Entrada":
-                    # Solo re-ejecutar entrada si NO se ha registrado también la salida;
-                    # después de una salida correcta, el sitio normalmente muestra
-                    # el botón 'Marcar Entrada' (estado esperado), por lo que no
-                    # debemos considerar esto como una inconsistencia.
-                    if not ya_se_ejecuto_hoy(tipo_salida):
-                        logger.warning(f"⚠️ INCONSISTENCIA DETECTADA!")
-                        logger.warning(f"   • Registro local indica: {tipo_entrada} ejecutado")
-                        logger.warning(f"   • Estado real GeoVictoria: Botón 'Marcar Entrada' disponible")
-                        logger.warning(f"   • Posible salida accidental registrada")
-                        logger.info(f"   • Re-ejecutando marcaje de entrada...")
-                        logger.info("=" * 80)
-
-                        # NO validar horario en corrección de inconsistencias
-                        ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
-                        marcajes_ejecutados += 1
-                    else:
-                        logger.info("✅ Estado consistente: Entrada y Salida ya registrados; no se re-ejecutará entrada")
-                else:
-                    logger.info(f"✅ Estado confirmado: {boton_disponible or 'Ningún botón'} disponible")
-            except Exception as e:
-                logger.error(f"❌ Error verificando estado: {e}")
+            # NO verificar inconsistencias si la entrada ya está registrada
+            # Esto evita re-ejecuciones innecesarias
         else:
-            logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_entrada}")
-            logger.info(f"   • Hora programada: {hora_entrada.strftime('%H:%M')}")
-            logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
-            logger.info(f"   • El PC probablemente se inició tarde")
-            logger.info("   • Ejecutando marcaje pendiente...")
-            logger.info("=" * 80)
+            # Validar que tenga sentido marcar entrada según la hora actual
+            # No marcar entrada después de las 12 PM (mediodía)
+            hora_limite_entrada = time(12, 0)
             
-            # NO validar horario en marcajes pendientes por PC encendido tarde
-            ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
-            marcajes_ejecutados += 1
+            if hora_actual > hora_limite_entrada:
+                logger.warning(f"⚠️ MARCAJE PENDIENTE OMITIDO: {tipo_entrada}")
+                logger.warning(f"   • Hora programada: {hora_entrada.strftime('%H:%M')}")
+                logger.warning(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+                logger.warning(f"   • RAZÓN: Demasiado tarde para marcar entrada (después de 12:00 PM)")
+                logger.warning(f"   • ACCIÓN: No se ejecutará para evitar marcajes incorrectos")
+            else:
+                logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_entrada}")
+                logger.info(f"   • Hora programada: {hora_entrada.strftime('%H:%M')}")
+                logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+                logger.info(f"   • El PC probablemente se inició tarde")
+                logger.info("   • Ejecutando marcaje pendiente...")
+                logger.info("=" * 80)
+                
+                # NO validar horario en marcajes pendientes por PC encendido tarde
+                ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
+                marcajes_ejecutados += 1
     else:
         logger.info(f"⏰ Aún no es hora de marcar entrada (programado: {hora_entrada.strftime('%H:%M')})")
     
     # Verificar salida pendiente
     if hora_actual > hora_salida:
         if not ya_se_ejecuto_hoy(tipo_salida):
-            logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_salida}")
-            logger.info(f"   • Hora programada: {hora_salida.strftime('%H:%M')}")
-            logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
-            logger.info(f"   • El PC probablemente se inició tarde")
-            logger.info("   • Ejecutando marcaje pendiente...")
-            logger.info("=" * 80)
-            
-            # NO validar horario en marcajes pendientes
-            ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
-            marcajes_ejecutados += 1
+            # Validar que la entrada ya se haya marcado
+            if not ya_se_ejecuto_hoy(tipo_entrada):
+                logger.warning(f"⚠️ MARCAJE PENDIENTE OMITIDO: {tipo_salida}")
+                logger.warning(f"   • No se puede marcar salida sin entrada previa")
+                logger.warning(f"   • ACCIÓN: Omitiendo marcaje de salida")
+            else:
+                # Validar que tenga sentido marcar salida según la hora actual
+                # No marcar salida después de las 11 PM
+                hora_limite_salida = time(23, 0)
+                
+                if hora_actual > hora_limite_salida:
+                    logger.warning(f"⚠️ MARCAJE PENDIENTE OMITIDO: {tipo_salida}")
+                    logger.warning(f"   • Hora programada: {hora_salida.strftime('%H:%M')}")
+                    logger.warning(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+                    logger.warning(f"   • RAZÓN: Demasiado tarde para marcar salida (después de 11:00 PM)")
+                    logger.warning(f"   • ACCIÓN: No se ejecutará para evitar marcajes incorrectos")
+                else:
+                    logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_salida}")
+                    logger.info(f"   • Hora programada: {hora_salida.strftime('%H:%M')}")
+                    logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
+                    logger.info(f"   • El PC probablemente se inició tarde")
+                    logger.info("   • Ejecutando marcaje pendiente...")
+                    logger.info("=" * 80)
+                    
+                    # NO validar horario en marcajes pendientes
+                    ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
+                    marcajes_ejecutados += 1
         else:
             logger.info(f"✅ {tipo_salida} ya fue ejecutado hoy (según registro local)")
-            
-            # Verificar estado real en GeoVictoria
-            logger.info("🔍 Verificando estado real en GeoVictoria...")
-            try:
-                boton_disponible = asyncio.run(verificar_estado())
-                
-                if boton_disponible == "Salida":
-                    # Solo re-ejecutar salida si NO se completó el ciclo completo del día
-                    # (entrada -> salida). Si solo hay ENTRADA sin SALIDA, es legítimo
-                    # que aparezca el botón "Marcar Salida".
-                    if ya_se_ejecuto_hoy(tipo_entrada):
-                        logger.warning(f"⚠️ INCONSISTENCIA DETECTADA!")
-                        logger.warning(f"   • Registro local indica: {tipo_salida} ejecutado")
-                        logger.warning(f"   • Estado real GeoVictoria: Botón 'Marcar Salida' disponible")
-                        logger.warning(f"   • Posible entrada accidental posterior a salida")
-                        logger.info(f"   • Re-ejecutando marcaje de salida...")
-                        logger.info("=" * 80)
-                        
-                        # NO validar horario en corrección de inconsistencias
-                        ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
-                        marcajes_ejecutados += 1
-                    else:
-                        logger.info("✅ Estado inesperado: Salida registrada pero sin entrada previa; no se re-ejecutará")
-                else:
-                    logger.info(f"✅ Estado confirmado: {boton_disponible or 'Ningún botón'} disponible")
-            except Exception as e:
-                logger.error(f"❌ Error verificando estado: {e}")
+            # NO verificar inconsistencias si la salida ya está registrada
+            # Esto evita re-ejecuciones innecesarias
     else:
         logger.info(f"⏰ Aún no es hora de marcar salida (programado: {hora_salida.strftime('%H:%M')})")
     
