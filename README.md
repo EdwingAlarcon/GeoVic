@@ -2,7 +2,42 @@
 
 Sistema automatizado de marcaje de asistencia para GeoVictoria, configurado específicamente para Colombia con soporte completo de festivos nacionales.
 
-## 📋 Características
+## � Instalación Rápida
+
+### 1️⃣ Requisitos
+- Python 3.8+ ([Descargar](https://www.python.org/downloads/))
+- Git (opcional)
+
+### 2️⃣ Instalación
+```bash
+# Clonar el repositorio
+git clone https://github.com/EdwingAlarcon/GeoVic.git
+cd GeoVic
+
+# Instalar dependencias
+pip install -r requirements.txt
+playwright install chromium
+
+# Configurar credenciales
+# Crear archivo .env con:
+# GEOVICTORIA_USER=tu_usuario
+# GEOVICTORIA_PASSWORD=tu_contraseña
+```
+
+### 3️⃣ Primeros Pasos
+```bash
+# Windows - Marcaje manual de prueba
+scripts\ejecutar_manual.bat
+
+# Windows - Iniciar programador automático
+scripts\iniciar_programador.bat
+```
+
+📖 **Guía completa:** Ver [docs/INSTALACION_COMPLETA.md](docs/INSTALACION_COMPLETA.md)
+
+---
+
+## �📋 Características
 
 ✅ **Programación automática** - Lunes a Viernes y Sábados  
 ✅ **Horarios aleatorios** - Simula comportamiento humano natural  
@@ -32,34 +67,11 @@ El sistema genera horarios aleatorios cada día para simular un comportamiento h
 - **Domingos** - No laboral
 - **Festivos de Colombia** - Cálculo automático anual
 
-## 🚀 Instalación
-
-### 1. Instalar dependencias Python
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Instalar navegadores de Playwright
-
-```bash
-playwright install chromium
-```
-
-### 3. Configurar credenciales
-
-Cree un archivo `.env` en el mismo directorio del script:
-
-```env
-GEOVICTORIA_USER=su_usuario
-GEOVICTORIA_PASSWORD=su_contraseña
-```
-
-**⚠️ IMPORTANTE**: Nunca comparta el archivo `.env` ni lo suba a repositorios públicos.
+---
 
 ## 📖 Uso
 
-### Opción 1: Marcaje Manual (Una vez)
+### Marcaje Manual (Una Vez)
 
 **Windows:**
 ```bash
@@ -71,7 +83,7 @@ scripts\ejecutar_manual.bat
 python src/geovictoria.py
 ```
 
-### Opción 2: Programador Automático (Recomendado)
+### Programador Automático (Recomendado)
 
 **Windows:**
 ```bash
@@ -85,7 +97,7 @@ python src/programador.py
 
 El programador ejecutará automáticamente los marcajes según los horarios configurados.
 
-### Opción 3: Ver Festivos del Año
+### Ver Festivos del Año
 
 **Windows:**
 ```bash
@@ -96,6 +108,8 @@ scripts\ver_festivos.bat
 ```bash
 python src/festivos_colombia.py
 ```
+
+---
 
 ## 📁 Estructura del Proyecto
 
@@ -292,6 +306,29 @@ class Config:
 ### Error: "Credenciales no encontradas"
 - Verifique que el archivo `.env` existe
 - Confirme que las variables están bien escritas
+
+### Problemas con marcajes duplicados
+- Ver: [docs/SOLUCION_MARCAJES_DUPLICADOS.md](docs/SOLUCION_MARCAJES_DUPLICADOS.md)
+- Ejecutar: `scripts\corregir_problema_completo.bat`
+
+### Configurar tarea programada en Windows
+- Ver: [docs/CONFIGURAR_TAREA_WINDOWS.md](docs/CONFIGURAR_TAREA_WINDOWS.md)
+- Ejecutar: `scripts\configurar_tarea_windows.ps1`
+
+---
+
+## 📚 Documentación
+
+- 📖 [Instalación Completa](docs/INSTALACION_COMPLETA.md) - Guía detallada de instalación
+- 📖 [Instalación Rápida](docs/INSTALACION_RAPIDA.md) - Guía express
+- 📖 [Configurar Tarea Windows](docs/CONFIGURAR_TAREA_WINDOWS.md) - Automatización en Windows
+- 📖 [Solución: Marcajes Duplicados](docs/SOLUCION_MARCAJES_DUPLICADOS.md) - Resolver duplicados
+- 📖 [Solución: Salidas Accidentales](docs/SOLUCION_SALIDAS_ACCIDENTALES.md) - Resolver salidas accidentales
+- 📖 [Scripts Disponibles](scripts/README.md) - Lista completa de scripts
+
+---
+
+**Desarrollado para Colombia 🇨🇴**
 
 ### Error: "Timeout durante login"
 - Verifique usuario y contraseña
