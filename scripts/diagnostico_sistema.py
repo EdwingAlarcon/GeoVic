@@ -8,15 +8,16 @@ import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
-# Colores para la consola
+# Colores para la consola (opcional - funciona sin colorama)
 try:
-    import colorama
+    import colorama  # type: ignore
     colorama.init()
     GREEN = colorama.Fore.GREEN
     YELLOW = colorama.Fore.YELLOW
     RED = colorama.Fore.RED
     RESET = colorama.Style.RESET_ALL
-except ImportError:
+except (ImportError, AttributeError):
+    # Si colorama no está disponible, usar texto plano
     GREEN = YELLOW = RED = RESET = ""
 
 script_dir = Path(__file__).parent.parent / "src" / "logs"
