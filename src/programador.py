@@ -267,9 +267,16 @@ def entrada_semana():
 
 def salida_semana():
     """Marcaje de salida Lunes a Viernes con variación aleatoria calculada al ejecutar"""
-    # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
+    # PROTECCIÓN 1: Verificar si ya se ejecutó antes de hacer nada
     if ya_se_ejecuto_hoy("SALIDA SEMANA (L-V)"):
         logger.info("⏭️ SALIDA SEMANA (L-V) ya ejecutada hoy - Omitiendo")
+        return
+    
+    # PROTECCIÓN 2: Verificar que existe entrada previa (orden lógico)
+    if not ya_se_ejecuto_hoy("ENTRADA SEMANA (L-V)"):
+        logger.warning("⚠️ SALIDA SEMANA (L-V) omitida - No hay entrada previa registrada")
+        logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
+        logger.warning("   • La verificación periódica intentará corregir esto más tarde")
         return
     
     # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
@@ -309,9 +316,16 @@ def entrada_sabado():
 
 def salida_sabado():
     """Marcaje de salida Sábados con variación aleatoria calculada al ejecutar"""
-    # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
+    # PROTECCIÓN 1: Verificar si ya se ejecutó antes de hacer nada
     if ya_se_ejecuto_hoy("SALIDA SÁBADO"):
         logger.info("⏭️ SALIDA SÁBADO ya ejecutada hoy - Omitiendo")
+        return
+    
+    # PROTECCIÓN 2: Verificar que existe entrada previa (orden lógico)
+    if not ya_se_ejecuto_hoy("ENTRADA SÁBADO"):
+        logger.warning("⚠️ SALIDA SÁBADO omitida - No hay entrada previa registrada")
+        logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
+        logger.warning("   • La verificación periódica intentará corregir esto más tarde")
         return
     
     # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
