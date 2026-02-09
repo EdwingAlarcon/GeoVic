@@ -7,6 +7,8 @@ import logging
 import sys
 import json
 import random
+import os
+import atexit
 from datetime import datetime, date, time, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -24,6 +26,7 @@ log_dir = Path(__file__).parent / "logs"
 log_dir.mkdir(exist_ok=True)
 log_file = log_dir / f"programador_{datetime.now().strftime('%Y%m%d')}.log"
 registro_file = log_dir / "registro_ejecuciones.json"
+lock_file = log_dir / "programador.lock"
 
 # Configurar logging con manejo robusto para Task Scheduler
 logging.basicConfig(
@@ -242,6 +245,11 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
 
 def entrada_semana():
     """Marcaje de entrada Lunes a Viernes con variación aleatoria calculada al ejecutar"""
+    # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
+    if ya_se_ejecuto_hoy("ENTRADA SEMANA (L-V)"):
+        logger.info("⏭️ ENTRADA SEMANA (L-V) ya ejecutada hoy - Omitiendo")
+        return
+    
     # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
     variacion_minutos = random.randint(HorarioConfig.VARIACION_ENTRADA_MIN, HorarioConfig.VARIACION_ENTRADA_MAX)
     logger.info(f"🎲 Variación calculada para entrada: {variacion_minutos:+d} minutos")
@@ -259,6 +267,11 @@ def entrada_semana():
 
 def salida_semana():
     """Marcaje de salida Lunes a Viernes con variación aleatoria calculada al ejecutar"""
+    # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
+    if ya_se_ejecuto_hoy("SALIDA SEMANA (L-V)"):
+        logger.info("⏭️ SALIDA SEMANA (L-V) ya ejecutada hoy - Omitiendo")
+        return
+    
     # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
     variacion_minutos = random.randint(HorarioConfig.VARIACION_SALIDA_MIN, HorarioConfig.VARIACION_SALIDA_MAX)
     logger.info(f"🎲 Variación calculada para salida: {variacion_minutos:+d} minutos")
@@ -275,6 +288,11 @@ def salida_semana():
 
 def entrada_sabado():
     """Marcaje de entrada Sábados con variación aleatoria calculada al ejecutar"""
+    # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
+    if ya_se_ejecuto_hoy("ENTRADA SÁBADO"):
+        logger.info("⏭️ ENTRADA SÁBADO ya ejecutada hoy - Omitiendo")
+        return
+    
     # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
     variacion_minutos = random.randint(HorarioConfig.VARIACION_ENTRADA_MIN, HorarioConfig.VARIACION_ENTRADA_MAX)
     logger.info(f"🎲 Variación calculada para entrada sábado: {variacion_minutos:+d} minutos")
@@ -291,6 +309,11 @@ def entrada_sabado():
 
 def salida_sabado():
     """Marcaje de salida Sábados con variación aleatoria calculada al ejecutar"""
+    # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
+    if ya_se_ejecuto_hoy("SALIDA SÁBADO"):
+        logger.info("⏭️ SALIDA SÁBADO ya ejecutada hoy - Omitiendo")
+        return
+    
     # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
     variacion_minutos = random.randint(HorarioConfig.VARIACION_SALIDA_MIN, HorarioConfig.VARIACION_SALIDA_MAX)
     logger.info(f"🎲 Variación calculada para salida sábado: {variacion_minutos:+d} minutos")
@@ -520,9 +543,67 @@ def configurar_trabajos_fijos(scheduler):
 # Variable global para el scheduler
 scheduler_global = None
 
+def crear_lock_file():
+    """Crea un archivo de lock para prevenir múltiples instancias"""
+    if lock_file.exists():
+        try:
+            # Leer el PID del proceso existente
+            with open(lock_file, 'r') as f:
+                pid = int(f.read().strip())
+            
+            # Verificar si el proceso sigue corriendo
+            try:
+                import psutil
+                if psutil.pid_exists(pid):
+                    logger.error("=" * 80)
+                    logger.error("❌ ERROR: El programador ya está ejecutándose")
+                    logger.error(f"   PID del proceso existente: {pid}")
+                    logger.error("   Por favor detenga la instancia anterior antes de iniciar una nueva")
+                    logger.error("=" * 80)
+                    sys.exit(1)
+                else:
+                    logger.warning(f"⚠️ Lock file obsoleto encontrado (PID {pid} no existe) - Recreando")
+            except ImportError:
+                # Si psutil no está disponible, verificar con método alternativo
+                logger.warning("⚠️ psutil no disponible - Verificando lock file con método básico")
+                # Intentar verificar si el archivo es muy antiguo (más de 1 día)
+                from datetime import datetime
+                lock_age = datetime.now().timestamp() - lock_file.stat().st_mtime
+                if lock_age > 86400:  # 1 día
+                    logger.warning(f"⚠️ Lock file tiene {lock_age/3600:.1f} horas - Recreando")
+                else:
+                    logger.error("=" * 80)
+                    logger.error("❌ ERROR: Lock file existe y podría haber otra instancia corriendo")
+                    logger.error(f"   PID en lock file: {pid}")
+                    logger.error(f"   Si está seguro que no hay otra instancia, elimine: {lock_file}")
+                    logger.error("=" * 80)
+                    sys.exit(1)
+        except Exception as e:
+            logger.warning(f"⚠️ Error verificando lock file: {e} - Recreando")
+    
+    # Crear lock file con el PID actual
+    with open(lock_file, 'w') as f:
+        f.write(str(os.getpid()))
+    logger.info(f"🔒 Lock file creado: PID {os.getpid()}")
+
+def eliminar_lock_file():
+    """Elimina el archivo de lock al salir"""
+    try:
+        if lock_file.exists():
+            lock_file.unlink()
+            logger.info("🔓 Lock file eliminado")
+    except Exception as e:
+        logger.error(f"Error eliminando lock file: {e}")
+
 def main():
     """Función principal del programador"""
     global scheduler_global
+    
+    # PROTECCIÓN: Verificar si ya hay una instancia corriendo
+    crear_lock_file()
+    
+    # Registrar limpieza del lock file al salir
+    atexit.register(eliminar_lock_file)
     
     logger.info("\n" + "=" * 80)
     logger.info("🚀 INICIANDO PROGRAMADOR DE MARCAJES GEOVICTORIA")
