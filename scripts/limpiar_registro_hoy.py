@@ -52,12 +52,17 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
     
-    respuesta = input("¿Está seguro que desea eliminar el registro de hoy? (s/N): ")
-    
-    if respuesta.lower() in ['s', 'si', 'sí', 'y', 'yes']:
+    # Si se pasa --auto como argumento, no pedir confirmación
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--auto':
         limpiar_registro_hoy()
     else:
-        print("❌ Operación cancelada")
-    
-    print()
-    input("Presione Enter para salir...")
+        respuesta = input("¿Está seguro que desea eliminar el registro de hoy? (s/N): ")
+        
+        if respuesta.lower() in ['s', 'si', 'sí', 'y', 'yes']:
+            limpiar_registro_hoy()
+        else:
+            print("❌ Operación cancelada")
+        
+        print()
+        input("Presione Enter para salir...")
