@@ -69,6 +69,9 @@ class HorarioConfig:
     # Para salida: ocasionalmente antes, frecuentemente unos minutos tarde
     VARIACION_SALIDA_MIN = -3
     VARIACION_SALIDA_MAX = 12
+    
+    # Cooldown mínimo entre marcajes (segundos) - para prevenir marcajes consecutivos rápidos
+    COOLDOWN_ENTRE_MARCAJES = 300  # 5 minutos
 
 def calcular_horario_aleatorio(hora_base, minuto_base, variacion_min, variacion_max):
     """Calcula un horario aleatorio dentro del rango especificado"""
@@ -103,14 +106,16 @@ def guardar_registro_ejecucion(tipo_marcaje: str, variacion_minutos: int = 0):
     try:
         registro = leer_registro_ejecuciones()
         hoy = date.today().isoformat()
-        ahora = datetime.now().isoformat()
+        ahora = datetime.now()
+        ahora_iso = ahora.isoformat()
         
         if hoy not in registro:
             registro[hoy] = {}
         
         registro[hoy][tipo_marcaje] = {
             'ejecutado': True,
-            'hora': ahora,
+            'hora': ahora_iso,
+            'timestamp': ahora.timestamp(),  # Para cálculos de tiempo
             'variacion_minutos': variacion_minutos
         }
         
@@ -123,7 +128,7 @@ def guardar_registro_ejecucion(tipo_marcaje: str, variacion_minutos: int = 0):
         with open(registro_file, 'w', encoding='utf-8') as f:
             json.dump(registro, f, indent=2, ensure_ascii=False)
         
-        logger.debug(f"Registro guardado: {tipo_marcaje} a las {ahora}")
+        logger.debug(f"Registro guardado: {tipo_marcaje} a las {ahora_iso}")
     except Exception as e:
         logger.error(f"Error guardando registro de ejecución: {e}")
 
@@ -136,6 +141,27 @@ def ya_se_ejecuto_hoy(tipo_marcaje: str) -> bool:
         return registro[hoy][tipo_marcaje].get('ejecutado', False)
     
     return False
+
+def tiempo_desde_ultimo_marcaje() -> float:
+    """Retorna segundos desde el último marcaje de cualquier tipo (hoy)"""
+    registro = leer_registro_ejecuciones()
+    hoy = date.today().isoformat()
+    
+    if hoy not in registro:
+        return float('inf')  # No hay marcajes hoy
+    
+    ahora = datetime.now().timestamp()
+    timestamps = []
+    
+    for tipo_marcaje, info in registro[hoy].items():
+        if 'timestamp' in info:
+            timestamps.append(info['timestamp'])
+    
+    if not timestamps:
+        return float('inf')
+    
+    ultimo_timestamp = max(timestamps)
+    return ahora - ultimo_timestamp
 
 def determinar_tipo_marcaje(accion: str, dia_semana: int) -> str:
     """Determina el tipo de marcaje basado en la acción real ejecutada y el día"""
@@ -168,6 +194,25 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
     logger.info(f"🕐 Hora: {ahora.strftime('%H:%M:%S')}")
     if variacion_minutos != 0:
         logger.info(f"🎲 Variación aleatoria: {variacion_minutos:+d} minutos")
+    
+    # PROTECCIÓN CRÍTICA: Verificar si ya se ejecutó (verificación temprana)
+    if ya_se_ejecuto_hoy(tipo_marcaje):
+        logger.warning(f"⏭️ {tipo_marcaje} YA FUE EJECUTADO HOY - OMITIENDO")
+        logger.warning(f"   Esta es una protección contra ejecuciones duplicadas")
+        logger.info("=" * 80)
+        return None
+    
+    # PROTECCIÓN ADICIONAL: Cooldown entre marcajes
+    segundos_desde_ultimo = tiempo_desde_ultimo_marcaje()
+    if segundos_desde_ultimo < HorarioConfig.COOLDOWN_ENTRE_MARCAJES:
+        tiempo_espera = HorarioConfig.COOLDOWN_ENTRE_MARCAJES - segundos_desde_ultimo
+        logger.warning(f"⏸️ COOLDOWN ACTIVO")
+        logger.warning(f"   • Último marcaje hace: {segundos_desde_ultimo:.0f} segundos")
+        logger.warning(f"   • Cooldown mínimo: {HorarioConfig.COOLDOWN_ENTRE_MARCAJES} segundos")
+        logger.warning(f"   • Tiempo restante: {tiempo_espera:.0f} segundos")
+        logger.warning(f"   • NO se ejecutará {tipo_marcaje} para prevenir marcaje rápido consecutivo")
+        logger.info("=" * 80)
+        return None
     
     # Verificar si es festivo
     if es_festivo(hoy):
@@ -244,29 +289,18 @@ def ejecutar_marcaje_con_validacion(tipo_marcaje: str, variacion_minutos: int = 
         logger.info("=" * 80)
 
 def entrada_semana():
-    """Marcaje de entrada Lunes a Viernes con variación aleatoria calculada al ejecutar"""
+    """Marcaje de entrada Lunes a Viernes SIN variación (horario fijo configurado en scheduler)"""
     # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
     if ya_se_ejecuto_hoy("ENTRADA SEMANA (L-V)"):
         logger.info("⏭️ ENTRADA SEMANA (L-V) ya ejecutada hoy - Omitiendo")
         return
     
-    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
-    variacion_minutos = random.randint(HorarioConfig.VARIACION_ENTRADA_MIN, HorarioConfig.VARIACION_ENTRADA_MAX)
-    logger.info(f"🎲 Variación calculada para entrada: {variacion_minutos:+d} minutos")
-    
-    # Esperar la variación antes de ejecutar
-    if variacion_minutos > 0:
-        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar entrada...")
-        import time
-        time.sleep(variacion_minutos * 60)
-    elif variacion_minutos < 0:
-        # Variación negativa ya fue aplicada por programarse antes
-        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
-    
-    ejecutar_marcaje_con_validacion("ENTRADA SEMANA (L-V)", variacion_minutos)
+    # No calcular variación - el scheduler ya programó en el horario exacto
+    logger.info(f"📍 Ejecutando marcaje de entrada en horario programado")
+    ejecutar_marcaje_con_validacion("ENTRADA SEMANA (L-V)", variacion_minutos=0)
 
 def salida_semana():
-    """Marcaje de salida Lunes a Viernes con variación aleatoria calculada al ejecutar"""
+    """Marcaje de salida Lunes a Viernes SIN variación (horario fijo configurado en scheduler)"""
     # PROTECCIÓN 1: Verificar si ya se ejecutó antes de hacer nada
     if ya_se_ejecuto_hoy("SALIDA SEMANA (L-V)"):
         logger.info("⏭️ SALIDA SEMANA (L-V) ya ejecutada hoy - Omitiendo")
@@ -279,43 +313,23 @@ def salida_semana():
         logger.warning("   • La verificación periódica intentará corregir esto más tarde")
         return
     
-    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
-    variacion_minutos = random.randint(HorarioConfig.VARIACION_SALIDA_MIN, HorarioConfig.VARIACION_SALIDA_MAX)
-    logger.info(f"🎲 Variación calculada para salida: {variacion_minutos:+d} minutos")
-    
-    # Esperar la variación antes de ejecutar
-    if variacion_minutos > 0:
-        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar salida...")
-        import time
-        time.sleep(variacion_minutos * 60)
-    elif variacion_minutos < 0:
-        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
-    
-    ejecutar_marcaje_con_validacion("SALIDA SEMANA (L-V)", variacion_minutos)
+    # No calcular variación - el scheduler ya programó en el horario exacto
+    logger.info(f"📍 Ejecutando marcaje de salida en horario programado")
+    ejecutar_marcaje_con_validacion("SALIDA SEMANA (L-V)", variacion_minutos=0)
 
 def entrada_sabado():
-    """Marcaje de entrada Sábados con variación aleatoria calculada al ejecutar"""
+    """Marcaje de entrada Sábados SIN variación (horario fijo configurado en scheduler)"""
     # PROTECCIÓN: Verificar si ya se ejecutó antes de hacer nada
     if ya_se_ejecuto_hoy("ENTRADA SÁBADO"):
         logger.info("⏭️ ENTRADA SÁBADO ya ejecutada hoy - Omitiendo")
         return
     
-    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
-    variacion_minutos = random.randint(HorarioConfig.VARIACION_ENTRADA_MIN, HorarioConfig.VARIACION_ENTRADA_MAX)
-    logger.info(f"🎲 Variación calculada para entrada sábado: {variacion_minutos:+d} minutos")
-    
-    # Esperar la variación antes de ejecutar
-    if variacion_minutos > 0:
-        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar entrada...")
-        import time
-        time.sleep(variacion_minutos * 60)
-    elif variacion_minutos < 0:
-        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
-    
-    ejecutar_marcaje_con_validacion("ENTRADA SÁBADO", variacion_minutos)
+    # No calcular variación - el scheduler ya programó en el horario exacto
+    logger.info(f"📍 Ejecutando marcaje de entrada sábado en horario programado")
+    ejecutar_marcaje_con_validacion("ENTRADA SÁBADO", variacion_minutos=0)
 
 def salida_sabado():
-    """Marcaje de salida Sábados con variación aleatoria calculada al ejecutar"""
+    """Marcaje de salida Sábados SIN variación (horario fijo configurado en scheduler)"""
     # PROTECCIÓN 1: Verificar si ya se ejecutó antes de hacer nada
     if ya_se_ejecuto_hoy("SALIDA SÁBADO"):
         logger.info("⏭️ SALIDA SÁBADO ya ejecutada hoy - Omitiendo")
@@ -328,19 +342,9 @@ def salida_sabado():
         logger.warning("   • La verificación periódica intentará corregir esto más tarde")
         return
     
-    # Calcular variación aleatoria AL MOMENTO DE EJECUTAR
-    variacion_minutos = random.randint(HorarioConfig.VARIACION_SALIDA_MIN, HorarioConfig.VARIACION_SALIDA_MAX)
-    logger.info(f"🎲 Variación calculada para salida sábado: {variacion_minutos:+d} minutos")
-    
-    # Esperar la variación antes de ejecutar
-    if variacion_minutos > 0:
-        logger.info(f"⏳ Esperando {variacion_minutos} minutos antes de marcar salida...")
-        import time
-        time.sleep(variacion_minutos * 60)
-    elif variacion_minutos < 0:
-        logger.info(f"✅ Marcaje adelantado {abs(variacion_minutos)} minutos")
-    
-    ejecutar_marcaje_con_validacion("SALIDA SÁBADO", variacion_minutos)
+    # No calcular variación - el scheduler ya programó en el horario exacto
+    logger.info(f"📍 Ejecutando marcaje de salida sábado en horario programado")
+    ejecutar_marcaje_con_validacion("SALIDA SÁBADO", variacion_minutos=0)
 
 def verificar_marcajes_pendientes():
     """Verifica y ejecuta marcajes pendientes consultando el estado real de GeoVictoria"""
@@ -552,7 +556,7 @@ def configurar_trabajos_fijos(scheduler):
     logger.info(f"  ✓ Verificación periódica: Cada hora en punto")
     
     logger.info("=" * 80)
-    logger.info("💡 Nota: La variación aleatoria se aplica al momento de ejecutar cada marcaje")
+    logger.info("💡 Nota: Los marcajes se ejecutan en horarios FIJOS (sin variación aleatoria)")
 
 # Variable global para el scheduler
 scheduler_global = None
@@ -660,13 +664,15 @@ def main():
     logger.info("  • Domingos: EXCLUIDOS (no se ejecuta)")
     logger.info("  • Festivos Colombia: EXCLUIDOS (validación automática)")
     logger.info("  • Zona horaria: America/Bogota")
-    logger.info("  • Horarios base: FIJOS (variación aleatoria se aplica al ejecutar)")
-    logger.info(f"    - Entrada L-V: {HorarioConfig.ENTRADA_SEMANA_HORA:02d}:{HorarioConfig.ENTRADA_SEMANA_MINUTO:02d} (± {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} min)")
-    logger.info(f"    - Salida L-V: {HorarioConfig.SALIDA_SEMANA_HORA:02d}:{HorarioConfig.SALIDA_SEMANA_MINUTO:02d} (± {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} min)")
-    logger.info(f"    - Entrada Sáb: {HorarioConfig.ENTRADA_SABADO_HORA:02d}:{HorarioConfig.ENTRADA_SABADO_MINUTO:02d} (± {HorarioConfig.VARIACION_ENTRADA_MIN} a {HorarioConfig.VARIACION_ENTRADA_MAX} min)")
-    logger.info(f"    - Salida Sáb: {HorarioConfig.SALIDA_SABADO_HORA:02d}:{HorarioConfig.SALIDA_SABADO_MINUTO:02d} (± {HorarioConfig.VARIACION_SALIDA_MIN} a {HorarioConfig.VARIACION_SALIDA_MAX} min)")
+    logger.info("  • Horarios: FIJOS (exactos, sin variación aleatoria)")
+    logger.info(f"    - Entrada L-V: {HorarioConfig.ENTRADA_SEMANA_HORA:02d}:{HorarioConfig.ENTRADA_SEMANA_MINUTO:02d}")
+    logger.info(f"    - Salida L-V: {HorarioConfig.SALIDA_SEMANA_HORA:02d}:{HorarioConfig.SALIDA_SEMANA_MINUTO:02d}")
+    logger.info(f"    - Entrada Sáb: {HorarioConfig.ENTRADA_SABADO_HORA:02d}:{HorarioConfig.ENTRADA_SABADO_MINUTO:02d}")
+    logger.info(f"    - Salida Sáb: {HorarioConfig.SALIDA_SABADO_HORA:02d}:{HorarioConfig.SALIDA_SABADO_MINUTO:02d}")
+    logger.info(f"  • Cooldown entre marcajes: {HorarioConfig.COOLDOWN_ENTRE_MARCAJES} segundos")
     logger.info("  • Verificación periódica: CADA HORA (detecta y ejecuta marcajes pendientes)")
     logger.info("  • Recuperación automática: SI (al inicio y cada hora)")
+    logger.info("  • Protección contra duplicados: MÚLTIPLES CAPAS (registro + cooldown + validación)")
     logger.info("=" * 80)
     
     logger.info("\n⏰ Programador activo. Presione Ctrl+C para detener.\n")

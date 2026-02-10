@@ -1,92 +1,129 @@
 @echo off
-chcp 65001 > nul
-cd /d "%~dp0.."
-
-echo ╔════════════════════════════════════════════════════════════════╗
-echo ║                                                                ║
-echo ║     CORRECCIÓN COMPLETA DE MARCAJES DUPLICADOS                 ║
-echo ║                                                                ║
-echo ╚════════════════════════════════════════════════════════════════╝
+echo ========================================
+echo   CORRECCION COMPLETA DEL PROBLEMA
+echo   Marcajes Multiples Duplicados
+echo ========================================
 echo.
-echo Este script ejecutará TODOS los pasos necesarios para corregir
-echo el problema de marcajes duplicados.
+echo Este script hara lo siguiente:
+echo   1. Detener TODAS las instancias de Python (requiere admin)
+echo   2. Eliminar archivos de lock
+echo   3. Limpiar registro de marcajes de HOY
+echo   4. Iniciar UNA SOLA instancia del programador
 echo.
 pause
 
+REM ============================================
+REM 1. DETENER PROCESOS (requiere permisos admin)
+REM ============================================
 echo.
-echo ════════════════════════════════════════════════════════════════
-echo  PASO 1: Instalando dependencias...
-echo ════════════════════════════════════════════════════════════════
+echo [1/4] Deteniendo procesos de Python...
 echo.
-call scripts\instalar_psutil.bat
+echo IMPORTANTE: Si aparecen errores de "Acceso denegado":
+echo   1. Cierre esta ventana
+echo   2. Click derecho en este archivo
+echo   3. Seleccione "Ejecutar como administrador"
+echo.
 
-echo.
-echo ════════════════════════════════════════════════════════════════
-echo  PASO 2: Deteniendo todas las instancias del programador...
-echo ════════════════════════════════════════════════════════════════
-echo.
-
-echo Buscando procesos de Python...
-tasklist /FI "IMAGENAME eq python.exe" /V 2>nul | findstr /I "programador" >nul
-if %ERRORLEVEL% EQU 0 (
-    echo ✓ Procesos encontrados - Deteniendo...
-    for /f "tokens=2" %%i in ('tasklist /FI "IMAGENAME eq python.exe" /NH ^| findstr /I "python"') do (
-        echo   • Deteniendo PID %%i...
-        taskkill /PID %%i /F >nul 2>&1
-    )
+taskkill /F /IM python.exe 2>nul
+if errorlevel 1 (
+    echo.
+    echo [ADVERTENCIA] No se pudieron detener algunos procesos
+    echo Esto puede significar:
+    echo   - No hay procesos corriendo (OK)
+    echo   - Necesita permisos de administrador
+    echo.
+    echo Continuando de todas formas...
 ) else (
-    echo ℹ No se encontraron procesos del programador
+    echo [OK] Procesos Python detenidos
 )
 
+timeout /t 3 >nul
+
+REM ============================================
+REM 2. ELIMINAR LOCK FILES
+REM ============================================
 echo.
-echo Eliminando archivo de lock...
+echo [2/4] Eliminando archivos de lock...
+cd /d "%~dp0\.."
+
 if exist "src\logs\programador.lock" (
-    del /F "src\logs\programador.lock" 2>nul
-    echo ✓ Lock file eliminado
+    del /F /Q "src\logs\programador.lock" 2>nul
+    echo [OK] Lock file eliminado
 ) else (
-    echo ℹ Lock file no encontrado
+    echo [INFO] No habia lock file
 )
 
-timeout /t 2 >nul
-
+REM ============================================
+REM 3. LIMPIAR REGISTRO DE HOY
+REM ============================================
 echo.
-echo ════════════════════════════════════════════════════════════════
-echo  PASO 3: Limpiando registro de ejecuciones de hoy...
-echo ════════════════════════════════════════════════════════════════
-echo.
-
-if exist ".venv\Scripts\python.exe" (
-    .venv\Scripts\python.exe scripts\limpiar_registro_hoy.py --auto
+echo [3/4] Limpiando registro de marcajes de hoy...
+python scripts\limpiar_registro_hoy.py
+if errorlevel 1 (
+    echo [ADVERTENCIA] Error limpiando registro
 ) else (
-    python scripts\limpiar_registro_hoy.py --auto
+    echo [OK] Registro limpiado
 )
 
+REM ============================================
+REM 4. VERIFICAR QUE NO QUEDEN PROCESOS
+REM ============================================
 echo.
-echo ════════════════════════════════════════════════════════════════
-echo  PASO 4: Ejecutando diagnóstico del sistema...
-echo ════════════════════════════════════════════════════════════════
-echo.
-
-if exist ".venv\Scripts\python.exe" (
-    .venv\Scripts\python.exe scripts\diagnostico_sistema.py
+echo [VERIFICACION] Comprobando que no quedan procesos...
+tasklist /FI "IMAGENAME eq python.exe" /FO CSV /NH 2>nul | find /I "python.exe" >nul
+if errorlevel 1 (
+    echo [OK] No hay procesos Python corriendo
 ) else (
-    python scripts\diagnostico_sistema.py
+    echo.
+    echo [ADVERTENCIA] Aun hay procesos Python corriendo:
+    tasklist /FI "IMAGENAME eq python.exe" /FO TABLE
+    echo.
+    echo Desea continuar de todas formas? (S/N)
+    choice /C SN /N
+    if errorlevel 2 goto :fin
 )
 
+REM ============================================
+REM 5. ESPERAR UN MOMENTO
+REM ============================================
 echo.
-echo ════════════════════════════════════════════════════════════════
-echo  CORRECCIÓN COMPLETADA
-echo ════════════════════════════════════════════════════════════════
+echo Esperando 5 segundos antes de reiniciar...
+timeout /t 5 >nul
+
+REM ============================================
+REM 6. INICIAR PROGRAMADOR
+REM ============================================
 echo.
-echo ✅ Todos los pasos ejecutados correctamente
+echo [4/4] Iniciando programador (UNA SOLA INSTANCIA)...
 echo.
-echo 📋 PRÓXIMOS PASOS MANUALES:
+echo ========================================
+echo   IMPORTANTE
+echo ========================================
+echo Se abrira una nueva ventana con el programador
+echo NO CIERRE ESA VENTANA
+echo Puede minimizarla pero NO cerrarla
+echo ========================================
 echo.
-echo    1. Ejecute: scripts\iniciar_programador.bat
-echo       (para iniciar el programador limpio)
+timeout /t 3 >nul
+
+start "Programador GeoVictoria" cmd /k "cd /d "%~dp0\.." && python src\programador.py"
+
 echo.
-echo    2. Verifique el estado con: scripts\ver_estado.bat
+echo ========================================
+echo   PROCESO COMPLETADO
+echo ========================================
 echo.
-echo ════════════════════════════════════════════════════════════════
+echo El programador esta corriendo en una ventana separada
 echo.
+echo Verifique que:
+echo   [x] Solo hay UNA ventana del programador
+echo   [x] Los horarios se muestran correctamente
+echo   [x] No hay errores en pantalla
+echo.
+echo Puede cerrar ESTA ventana ahora
+echo (NO cierre la ventana del programador)
+echo ========================================
+echo.
+
+:fin
 pause
