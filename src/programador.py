@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.geovictoria import run, verificar_estado
 from src.festivos_colombia import es_dia_laborable, es_festivo, listar_festivos_año
+from src.cache_estado import get_cache
 
 # Configuración de logging y registro de ejecuciones
 log_dir = Path(__file__).parent / "logs"
@@ -141,6 +142,31 @@ def ya_se_ejecuto_hoy(tipo_marcaje: str) -> bool:
         return registro[hoy][tipo_marcaje].get('ejecutado', False)
     
     return False
+
+def verificar_estado_con_cache() -> str:
+    """Verifica estado en GeoVictoria usando caché para evitar consultas redundantes"""
+    cache = get_cache()
+    
+    # Intentar obtener del caché primero
+    estado_cached = cache.get()
+    if estado_cached is not None:
+        logger.debug(f"📦 Estado obtenido del caché: {estado_cached}")
+        return estado_cached
+    
+    # Si no hay caché, consultar GeoVictoria
+    try:
+        logger.debug("🔍 Consultando estado en GeoVictoria (no hay caché válido)...")
+        estado = asyncio.run(verificar_estado())
+        
+        # Guardar en caché
+        if estado:
+            cache.set(estado)
+            logger.debug(f"💾 Estado guardado en caché: {estado}")
+        
+        return estado
+    except Exception as e:
+        logger.error(f"❌ Error verificando estado: {e}")
+        return None
 
 def tiempo_desde_ultimo_marcaje() -> float:
     """Retorna segundos desde el último marcaje de cualquier tipo (hoy)"""
@@ -311,27 +337,27 @@ def salida_semana():
         logger.warning("⚠️ No hay entrada registrada localmente")
         logger.warning("   • Verificando estado real en GeoVictoria...")
         
-        try:
-            boton_disponible = asyncio.run(verificar_estado())
-            if boton_disponible == "Salida":
-                # La entrada ya fue marcada (manual o automáticamente) pero no está registrada localmente
-                logger.info(f"✅ ENTRADA SEMANA (L-V) detectada en GeoVictoria")
-                logger.info(f"   • Actualizando registro local...")
-                guardar_registro_ejecucion("ENTRADA SEMANA (L-V)", variacion_minutos=0)
-                logger.info(f"💾 Registro de entrada actualizado")
-                logger.info(f"   • Continuando con marcaje de salida...")
-                # Continuar con la salida más abajo
-            else:
-                # Realmente no hay entrada marcada
-                logger.warning("⚠️ SALIDA SEMANA (L-V) omitida - No hay entrada previa en GeoVictoria")
-                logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
-                logger.warning("   • Por favor, marque entrada manualmente antes de marcar salida")
-                return
-        except Exception as e:
-            logger.error(f"❌ Error verificando estado en GeoVictoria: {e}")
-            logger.warning("   • No se puede confirmar si hay entrada marcada")
-            logger.warning("   • Omitiendo salida por seguridad")
+        # Invalidar caché para verificación fresca antes de marcaje importante
+        get_cache().invalidar()
+        boton_disponible = verificar_estado_con_cache()
+        
+        if boton_disponible == "Salida":
+            # La entrada ya fue marcada (manual o automáticamente) pero no está registrada localmente
+            logger.info(f"✅ ENTRADA SEMANA (L-V) detectada en GeoVictoria")
+            logger.info(f"   • Actualizando registro local...")
+            guardar_registro_ejecucion("ENTRADA SEMANA (L-V)", variacion_minutos=0)
+            logger.info(f"💾 Registro de entrada actualizado")
+            logger.info(f"   • Continuando con marcaje de salida...")
+            # Continuar con la salida más abajo
+        else:
+            # Realmente no hay entrada marcada
+            logger.warning("⚠️ SALIDA SEMANA (L-V) omitida - No hay entrada previa en GeoVictoria")
+            logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
+            logger.warning("   • Por favor, marque entrada manualmente antes de marcar salida")
             return
+    
+    # Invalidar caché antes de ejecutar marcaje
+    get_cache().invalidar()
     
     # No calcular variación - el scheduler ya programó en el horario exacto
     logger.info(f"📍 Ejecutando marcaje de salida en horario programado")
@@ -360,27 +386,27 @@ def salida_sabado():
         logger.warning("⚠️ No hay entrada de sábado registrada localmente")
         logger.warning("   • Verificando estado real en GeoVictoria...")
         
-        try:
-            boton_disponible = asyncio.run(verificar_estado())
-            if boton_disponible == "Salida":
-                # La entrada ya fue marcada (manual o automáticamente) pero no está registrada localmente
-                logger.info(f"✅ ENTRADA SÁBADO detectada en GeoVictoria")
-                logger.info(f"   • Actualizando registro local...")
-                guardar_registro_ejecucion("ENTRADA SÁBADO", variacion_minutos=0)
-                logger.info(f"💾 Registro de entrada actualizado")
-                logger.info(f"   • Continuando con marcaje de salida...")
-                # Continuar con la salida más abajo
-            else:
-                # Realmente no hay entrada marcada
-                logger.warning("⚠️ SALIDA SÁBADO omitida - No hay entrada previa en GeoVictoria")
-                logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
-                logger.warning("   • Por favor, marque entrada manualmente antes de marcar salida")
-                return
-        except Exception as e:
-            logger.error(f"❌ Error verificando estado en GeoVictoria: {e}")
-            logger.warning("   • No se puede confirmar si hay entrada marcada")
-            logger.warning("   • Omitiendo salida por seguridad")
+        # Invalidar caché para verificación fresca antes de marcaje importante
+        get_cache().invalidar()
+        boton_disponible = verificar_estado_con_cache()
+        
+        if boton_disponible == "Salida":
+            # La entrada ya fue marcada (manual o automáticamente) pero no está registrada localmente
+            logger.info(f"✅ ENTRADA SÁBADO detectada en GeoVictoria")
+            logger.info(f"   • Actualizando registro local...")
+            guardar_registro_ejecucion("ENTRADA SÁBADO", variacion_minutos=0)
+            logger.info(f"💾 Registro de entrada actualizado")
+            logger.info(f"   • Continuando con marcaje de salida...")
+            # Continuar con la salida más abajo
+        else:
+            # Realmente no hay entrada marcada
+            logger.warning("⚠️ SALIDA SÁBADO omitida - No hay entrada previa en GeoVictoria")
+            logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
+            logger.warning("   • Por favor, marque entrada manualmente antes de marcar salida")
             return
+    
+    # Invalidar caché antes de ejecutar marcaje
+    get_cache().invalidar()
     
     # No calcular variación - el scheduler ya programó en el horario exacto
     logger.info(f"📍 Ejecutando marcaje de salida sábado en horario programado")
@@ -398,6 +424,9 @@ def verificar_marcajes_pendientes():
     logger.info(f"📅 Fecha: {hoy.strftime('%A, %d de %B de %Y')}")
     logger.info(f"🕐 Hora actual: {ahora.strftime('%H:%M:%S')}")
     logger.info("=" * 80)
+    
+    # Invalidar caché al inicio para forzar verificación fresca
+    get_cache().invalidar()
     
     # No verificar si es domingo o festivo
     if es_festivo(hoy):
@@ -443,46 +472,40 @@ def verificar_marcajes_pendientes():
             
             if hora_actual > hora_limite_entrada:
                 # Verificar si el usuario ya marcó entrada manualmente
-                logger.info(f"⚠️ Pasó la hora límite de entrada (12:00 PM) - Verificando estado en GeoVictoria...")
-                try:
-                    boton_disponible = asyncio.run(verificar_estado())
-                    if boton_disponible == "Salida":
-                        # El usuario ya marcó entrada manualmente
-                        logger.info(f"✅ {tipo_entrada} detectado en GeoVictoria (marcado manualmente)")
-                        logger.info(f"   • Registrando entrada en sistema local...")
-                        guardar_registro_ejecucion(tipo_entrada, variacion_minutos=0)
-                        logger.info(f"💾 {tipo_entrada} registrado correctamente")
-                    else:
-                        logger.warning(f"⚠️ MARCAJE PERDIDO: {tipo_entrada}")
-                        logger.warning(f"   • Demasiado tarde para marcar entrada automáticamente")
-                        logger.warning(f"   • Por favor, marque entrada manualmente en GeoVictoria")
-                except Exception as e:
-                    logger.error(f"❌ Error verificando estado: {e}")
+                logger.info(f"⚠️ Pasó la hora límite de entrada (12:00 PM) - Verificando estado...")
+                boton_disponible = verificar_estado_con_cache()
+                if boton_disponible == "Salida":
+                    # El usuario ya marcó entrada manualmente
+                    logger.info(f"✅ {tipo_entrada} detectado en GeoVictoria (marcado manualmente)")
+                    logger.info(f"   • Registrando entrada en sistema local...")
+                    guardar_registro_ejecucion(tipo_entrada, variacion_minutos=0)
+                    logger.info(f"💾 {tipo_entrada} registrado correctamente")
+                else:
+                    logger.warning(f"⚠️ MARCAJE PERDIDO: {tipo_entrada}")
+                    logger.warning(f"   • Demasiado tarde para marcar entrada automáticamente")
+                    logger.warning(f"   • Por favor, marque entrada manualmente en GeoVictoria")
             else:
                 logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_entrada}")
                 logger.info(f"   • Hora programada: {hora_entrada.strftime('%H:%M')}")
                 logger.info(f"   • Hora actual: {hora_actual.strftime('%H:%M')}")
                 
                 # Primero verificar qué botón está disponible en GeoVictoria
-                try:
-                    boton_disponible = asyncio.run(verificar_estado())
-                    if boton_disponible == "Salida":
-                        # El usuario ya marcó entrada manualmente
-                        logger.info(f"✅ {tipo_entrada} detectado en GeoVictoria (marcado manualmente)")
-                        logger.info(f"   • Registrando entrada en sistema local...")
-                        guardar_registro_ejecucion(tipo_entrada, variacion_minutos=0)
-                        logger.info(f"💾 {tipo_entrada} registrado correctamente")
-                    elif boton_disponible == "Entrada":
-                        logger.info("   • El PC probablemente se inició tarde")
-                        logger.info("   • Ejecutando marcaje pendiente...")
-                        logger.info("=" * 80)
-                        # NO validar horario en marcajes pendientes
-                        ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
-                        marcajes_ejecutados += 1
-                    else:
-                        logger.warning(f"⚠️ No se pudo determinar el estado en GeoVictoria")
-                except Exception as e:
-                    logger.error(f"❌ Error verificando estado: {e}")
+                boton_disponible = verificar_estado_con_cache()
+                if boton_disponible == "Salida":
+                    # El usuario ya marcó entrada manualmente
+                    logger.info(f"✅ {tipo_entrada} detectado en GeoVictoria (marcado manualmente)")
+                    logger.info(f"   • Registrando entrada en sistema local...")
+                    guardar_registro_ejecucion(tipo_entrada, variacion_minutos=0)
+                    logger.info(f"💾 {tipo_entrada} registrado correctamente")
+                elif boton_disponible == "Entrada":
+                    logger.info("   • El PC probablemente se inició tarde")
+                    logger.info("   • Ejecutando marcaje pendiente...")
+                    logger.info("=" * 80)
+                    # NO validar horario en marcajes pendientes
+                    ejecutar_marcaje_con_validacion(tipo_entrada, validar_horario=False)
+                    marcajes_ejecutados += 1
+                else:
+                    logger.warning(f"⚠️ No se pudo determinar el estado en GeoVictoria")
     else:
         logger.info(f"⏰ Aún no es hora de marcar entrada (programado: {hora_entrada.strftime('%H:%M')})")
     
@@ -494,30 +517,27 @@ def verificar_marcajes_pendientes():
                 logger.warning(f"⚠️ MARCAJE PENDIENTE OMITIDO: {tipo_salida}")
                 logger.warning(f"   • No se puede marcar salida sin entrada previa registrada")
                 logger.warning(f"   • Verificando estado en GeoVictoria...")
-                try:
-                    boton_disponible = asyncio.run(verificar_estado())
-                    if boton_disponible == "Salida":
-                        # Hay entrada marcada pero no registrada localmente
-                        logger.info(f"✅ Se detectó entrada previa en GeoVictoria")
-                        logger.info(f"   • Registrando entrada en sistema local...")
-                        guardar_registro_ejecucion(tipo_entrada, variacion_minutos=0)
-                        logger.info(f"💾 {tipo_entrada} registrado correctamente")
-                        logger.info(f"   • Ahora verificando marcaje de salida pendiente...")
-                        # Continuar con la verificación de salida
-                        hora_limite_salida = time(23, 0)
-                        if hora_actual > hora_limite_salida:
-                            logger.warning(f"⚠️ MARCAJE PENDIENTE OMITIDO: {tipo_salida}")
-                            logger.warning(f"   • Demasiado tarde para marcar salida (después de 11:00 PM)")
-                        else:
-                            logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_salida}")
-                            logger.info(f"   • Ejecutando marcaje pendiente...")
-                            logger.info("=" * 80)
-                            ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
-                            marcajes_ejecutados += 1
+                boton_disponible = verificar_estado_con_cache()
+                if boton_disponible == "Salida":
+                    # Hay entrada marcada pero no registrada localmente
+                    logger.info(f"✅ Se detectó entrada previa en GeoVictoria")
+                    logger.info(f"   • Registrando entrada en sistema local...")
+                    guardar_registro_ejecucion(tipo_entrada, variacion_minutos=0)
+                    logger.info(f"💾 {tipo_entrada} registrado correctamente")
+                    logger.info(f"   • Ahora verificando marcaje de salida pendiente...")
+                    # Continuar con la verificación de salida
+                    hora_limite_salida = time(23, 0)
+                    if hora_actual > hora_limite_salida:
+                        logger.warning(f"⚠️ MARCAJE PENDIENTE OMITIDO: {tipo_salida}")
+                        logger.warning(f"   • Demasiado tarde para marcar salida (después de 11:00 PM)")
                     else:
-                        logger.warning(f"   • ACCIÓN: Debe marcar entrada primero")
-                except Exception as e:
-                    logger.error(f"❌ Error verificando estado: {e}")
+                        logger.warning(f"⚠️ MARCAJE PENDIENTE DETECTADO: {tipo_salida}")
+                        logger.info(f"   • Ejecutando marcaje pendiente...")
+                        logger.info("=" * 80)
+                        ejecutar_marcaje_con_validacion(tipo_salida, validar_horario=False)
+                        marcajes_ejecutados += 1
+                else:
+                    logger.warning(f"   • ACCIÓN: Debe marcar entrada primero")
             else:
                 # Validar que tenga sentido marcar salida según la hora actual
                 # No marcar salida después de las 11 PM
