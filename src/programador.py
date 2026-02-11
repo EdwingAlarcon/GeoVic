@@ -308,10 +308,30 @@ def salida_semana():
     
     # PROTECCIÓN 2: Verificar que existe entrada previa (orden lógico)
     if not ya_se_ejecuto_hoy("ENTRADA SEMANA (L-V)"):
-        logger.warning("⚠️ SALIDA SEMANA (L-V) omitida - No hay entrada previa registrada")
-        logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
-        logger.warning("   • La verificación periódica intentará corregir esto más tarde")
-        return
+        logger.warning("⚠️ No hay entrada registrada localmente")
+        logger.warning("   • Verificando estado real en GeoVictoria...")
+        
+        try:
+            boton_disponible = asyncio.run(verificar_estado())
+            if boton_disponible == "Salida":
+                # La entrada ya fue marcada (manual o automáticamente) pero no está registrada localmente
+                logger.info(f"✅ ENTRADA SEMANA (L-V) detectada en GeoVictoria")
+                logger.info(f"   • Actualizando registro local...")
+                guardar_registro_ejecucion("ENTRADA SEMANA (L-V)", variacion_minutos=0)
+                logger.info(f"💾 Registro de entrada actualizado")
+                logger.info(f"   • Continuando con marcaje de salida...")
+                # Continuar con la salida más abajo
+            else:
+                # Realmente no hay entrada marcada
+                logger.warning("⚠️ SALIDA SEMANA (L-V) omitida - No hay entrada previa en GeoVictoria")
+                logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
+                logger.warning("   • Por favor, marque entrada manualmente antes de marcar salida")
+                return
+        except Exception as e:
+            logger.error(f"❌ Error verificando estado en GeoVictoria: {e}")
+            logger.warning("   • No se puede confirmar si hay entrada marcada")
+            logger.warning("   • Omitiendo salida por seguridad")
+            return
     
     # No calcular variación - el scheduler ya programó en el horario exacto
     logger.info(f"📍 Ejecutando marcaje de salida en horario programado")
@@ -337,10 +357,30 @@ def salida_sabado():
     
     # PROTECCIÓN 2: Verificar que existe entrada previa (orden lógico)
     if not ya_se_ejecuto_hoy("ENTRADA SÁBADO"):
-        logger.warning("⚠️ SALIDA SÁBADO omitida - No hay entrada previa registrada")
-        logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
-        logger.warning("   • La verificación periódica intentará corregir esto más tarde")
-        return
+        logger.warning("⚠️ No hay entrada de sábado registrada localmente")
+        logger.warning("   • Verificando estado real en GeoVictoria...")
+        
+        try:
+            boton_disponible = asyncio.run(verificar_estado())
+            if boton_disponible == "Salida":
+                # La entrada ya fue marcada (manual o automáticamente) pero no está registrada localmente
+                logger.info(f"✅ ENTRADA SÁBADO detectada en GeoVictoria")
+                logger.info(f"   • Actualizando registro local...")
+                guardar_registro_ejecucion("ENTRADA SÁBADO", variacion_minutos=0)
+                logger.info(f"💾 Registro de entrada actualizado")
+                logger.info(f"   • Continuando con marcaje de salida...")
+                # Continuar con la salida más abajo
+            else:
+                # Realmente no hay entrada marcada
+                logger.warning("⚠️ SALIDA SÁBADO omitida - No hay entrada previa en GeoVictoria")
+                logger.warning("   • No se puede marcar salida sin haber marcado entrada primero")
+                logger.warning("   • Por favor, marque entrada manualmente antes de marcar salida")
+                return
+        except Exception as e:
+            logger.error(f"❌ Error verificando estado en GeoVictoria: {e}")
+            logger.warning("   • No se puede confirmar si hay entrada marcada")
+            logger.warning("   • Omitiendo salida por seguridad")
+            return
     
     # No calcular variación - el scheduler ya programó en el horario exacto
     logger.info(f"📍 Ejecutando marcaje de salida sábado en horario programado")
