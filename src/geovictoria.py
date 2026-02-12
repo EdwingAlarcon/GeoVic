@@ -57,27 +57,46 @@ async def wait_for_iframe(page, max_retries=2):
                 logger.debug(f"Buscando iframe...")
             else:
                 logger.info(f"Reintentando buscar iframe ({attempt}/{max_retries})...")
-                
-            await page.wait_for_selector("iframe", timeout=Config.IFRAME_TIMEOUT)
             
-            # Esperar a que los iframes se carguen
-            await page.wait_for_load_state("networkidle", timeout=8000)
+            # Intentar esperar a que la página cargue (con timeout tolerable)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+                logger.debug("Página cargada (networkidle)")
+            except PlaywrightTimeoutError:
+                logger.debug("Timeout esperando networkidle, continuando...")
             
-            # Buscar iframe gvportal
+            # Esperar más tiempo para que los iframes se carguen
+            await asyncio.sleep(4)
+            
+            # Log de qué frames hay disponibles
+            frames_urls = [f.url for f in page.frames]
+            logger.info(f"Frames disponibles en intento {attempt}: {len(page.frames)}")
+            for idx, url in enumerate(frames_urls):
+                logger.info(f"  Frame {idx}: {url}")
+            
+            # Buscar iframe gvportal directamente por URL
             for frame in page.frames:
                 if Config.IFRAME_DOMAIN in frame.url:
-                    logger.debug(f"✅ Iframe encontrado")
+                    logger.info(f"✅ Iframe encontrado: {frame.url}")
                     return frame
             
+            # Si no se encontró, intentar esperar más tiempo
             if attempt < max_retries:
-                await asyncio.sleep(Config.RETRY_DELAY)
+                logger.warning(f"Iframe gvportal no encontrado en intento {attempt}, esperando...")
+                await asyncio.sleep(3)
                 
-        except PlaywrightTimeoutError:
+        except Exception as e:
+            logger.warning(f"⚠️ Error buscando iframe en intento {attempt}: {e}")
             if attempt < max_retries:
-                logger.warning(f"⚠️ Timeout buscando iframe (intento {attempt})")
                 await asyncio.sleep(Config.RETRY_DELAY)
-            else:
-                logger.error(f"❌ No se encontró iframe después de {max_retries} intentos")
+    
+    # Log de diagnóstico final
+    try:
+        frames_urls = [f.url for f in page.frames]
+        logger.error(f"❌ No se encontró iframe después de {max_retries} intentos")
+        logger.error(f"Frames finales: {frames_urls}")
+    except Exception as e:
+        logger.error(f"❌ No se encontró iframe. Error al listar frames: {e}")
     
     return None
 
@@ -87,6 +106,13 @@ async def login(page, usuario, password):
         logger.debug("Navegando a página de login...")
         await page.goto(Config.LOGIN_URL, wait_until="domcontentloaded")
         
+        # Verificar si nos redirigió a "browsernotsupported"
+        if "browsernotsupported" in page.url:
+            logger.error("❌ GeoVictoria detectó navegador no soportado")
+            logger.error(f"   URL actual: {page.url}")
+            logger.error("   Esto puede resolverse usando un navegador no-headless")
+            return False
+        
         logger.debug("Completando formulario de login...")
         await page.fill("#user", usuario)
         await page.fill("input[type='password']", password)
@@ -94,6 +120,12 @@ async def login(page, usuario, password):
         
         logger.debug("Esperando confirmación de login...")
         await page.wait_for_url(lambda url: "login" not in url, timeout=Config.LOGIN_TIMEOUT)
+        
+        # Verificar otra vez después del login
+        if "browsernotsupported" in page.url:
+            logger.error("❌ Redirigido a browsernotsupported después del login")
+            return False
+        
         logger.debug("✅ Login exitoso")
         return True
         
@@ -181,13 +213,25 @@ async def verificar_estado():
         usuario, password = get_credentials()
         logger.debug("🔍 Verificando estado en GeoVictoria...")
         
-        # Iniciar navegador
+        # Iniciar navegador con configuración mejorada
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                viewport={'width': 1280, 'height': 720},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
+            browser = await p.chromium.launch(
+                headless=False,  # Usar navegador visible para evitar detección
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox'
+                ]
             )
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                locale='es-CO',
+                timezone_id='America/Bogota'
+            )
+            # Ocultar que es un navegador automatizado
+            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
             page = await context.new_page()
             
             # Login
@@ -233,14 +277,26 @@ async def run(accion_esperada=None):
             logger.info(f"Acción esperada: {accion_esperada}")
         logger.info("=" * 60)
         
-        # Iniciar navegador
+        # Iniciar navegador con configuración mejorada
         async with async_playwright() as p:
             logger.debug("Iniciando navegador...")
-            browser = await p.chromium.launch(headless=Config.HEADLESS)
-            context = await browser.new_context(
-                viewport={'width': 1280, 'height': 720},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
+            browser = await p.chromium.launch(
+                headless=Config.HEADLESS,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox'
+                ]
             )
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                locale='es-CO',
+                timezone_id='America/Bogota'
+            )
+            # Ocultar que es un navegador automatizado
+            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
             page = await context.new_page()
             
             # Login
