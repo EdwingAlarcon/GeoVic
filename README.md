@@ -374,11 +374,23 @@ class Config:
 
 ## 📚 Documentación
 
-- 📖 [Instalación Completa](docs/INSTALACION_COMPLETA.md) - Guía detallada de instalación
-- 📖 [Instalación Rápida](docs/INSTALACION_RAPIDA.md) - Guía express
+### 🚀 Instalación y Configuración
+- 📖 [Guía de Instalación](docs/GUIA_INSTALACION.md) - Guía completa paso a paso
+- 📖 [Instalación Completa](docs/INSTALACION_COMPLETA.md) - Instalación detallada con opciones
+- 📖 [Instalación Rápida](docs/INSTALACION_RAPIDA.md) - Instalación express en minutos
 - 📖 [Configurar Tarea Windows](docs/CONFIGURAR_TAREA_WINDOWS.md) - Automatización en Windows
-- 📖 [Solución: Marcajes Duplicados](docs/SOLUCION_MARCAJES_DUPLICADOS.md) - Resolver duplicados
-- 📖 [Solución: Salidas Accidentales](docs/SOLUCION_SALIDAS_ACCIDENTALES.md) - Resolver salidas accidentales
+
+### 📦 Distribución y Exportación
+- 📖 [Cómo Exportar](docs/COMO_EXPORTAR.md) - Exportar el proyecto a otro PC
+- 📖 [Proyecto Listo](docs/PROYECTO_LISTO.md) - Estado del proyecto completo
+
+### 🐛 Solución de Problemas
+- 📖 [Marcajes Duplicados](docs/SOLUCION_MARCAJES_DUPLICADOS.md) - Resolver marcajes duplicados
+- 📖 [Marcajes Múltiples](docs/SOLUCION_MARCAJES_MULTIPLES.md) - Solucionar marcajes múltiples
+- 📖 [Salidas Accidentales](docs/SOLUCION_SALIDAS_ACCIDENTALES.md) - Corregir salidas accidentales
+
+### 📂 Índice Completo
+- 📖 [Ver toda la documentación](docs/README.md) - Índice completo de documentos
 - 📖 [Scripts Disponibles](scripts/README.md) - Lista completa de scripts
 
 ---
