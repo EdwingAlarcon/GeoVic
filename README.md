@@ -109,6 +109,61 @@ scripts\ver_festivos.bat
 python src/festivos_colombia.py
 ```
 
+### Verificar Instalación
+
+Para verificar que todo está instalado correctamente:
+
+```bash
+scripts\verificar_instalacion.bat
+```
+
+---
+
+## 🛠️ Scripts Disponibles
+
+El proyecto incluye varios scripts de utilidad en la carpeta `scripts/`:
+
+| Script | Descripción |
+|--------|-------------|
+| `ejecutar_manual.bat` | Ejecuta un marcaje manual de prueba |
+| `iniciar_programador.bat` | Inicia el programador automático |
+| `ver_estado.bat` | Muestra el estado actual del sistema |
+| `verificar_instalacion.bat` | Verifica que todo está instalado correctamente |
+| `ver_festivos.bat` | Lista los festivos de Colombia |
+| `SOLUCION_HOY.bat` | Limpia marcajes duplicados del día actual |
+
+---
+
+## 📦 Exportar a Otro PC
+
+Para instalar este proyecto en otro PC o servidor:
+
+1. **Descargue** el proyecto (Git clone o ZIP)
+2. **Ejecute** `setup.bat` (Windows) o `bash setup.sh` (Linux/Mac)
+3. **Configure** el archivo `.env` con las credenciales del usuario
+4. **Listo** para usar
+
+📖 Ver [COMO_EXPORTAR.md](COMO_EXPORTAR.md) para guía completa de distribución
+
+---
+
+## 🔒 Seguridad y Credenciales
+
+- ✅ Cada usuario debe configurar sus propias credenciales en el archivo `.env`
+- ✅ El archivo `.env` está protegido por `.gitignore` (no se sube a Git)
+- ⚠️ **NUNCA** comparta su archivo `.env` con credenciales reales
+- ⚠️ Use el archivo `.env.example` como plantilla (sin credenciales)
+
+**Windows:**
+```bash
+scripts\ver_festivos.bat
+```
+
+**Linux/Mac:**
+```bash
+python src/festivos_colombia.py
+```
+
 ---
 
 ## 📁 Estructura del Proyecto

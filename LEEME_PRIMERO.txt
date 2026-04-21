@@ -1,0 +1,97 @@
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║          🚀 GEOVICTORIA - SISTEMA DE MARCAJE AUTOMÁTICO        ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+📋 INSTALACIÓN RÁPIDA (3 PASOS)
+═══════════════════════════════════════════════════════════════
+
+1️⃣  EJECUTAR INSTALADOR
+   └─ Haga doble clic en: setup.bat
+   └─ Espere a que termine (descarga navegador ~150MB)
+
+2️⃣  CONFIGURAR CREDENCIALES
+   └─ Abra el archivo: .env (con Bloc de notas)
+   └─ Reemplace "su_usuario_aqui" con su usuario
+   └─ Reemplace "su_contraseña_aqui" con su contraseña
+   └─ Guarde el archivo
+
+3️⃣  PROBAR EL SISTEMA
+   └─ Haga doble clic en: scripts\ejecutar_manual.bat
+   └─ Debería ver el navegador abrirse y marcar asistencia
+
+
+🎯 USAR EL SISTEMA
+═══════════════════════════════════════════════════════════════
+
+MARCAJE MANUAL (una vez):
+   scripts\ejecutar_manual.bat
+
+PROGRAMADOR AUTOMÁTICO (recomendado):
+   scripts\iniciar_programador.bat
+   └─ Marcará automáticamente todos los días laborables
+   └─ Lunes a Viernes: 7:00 AM y 5:00 PM
+   └─ Sábados: 7:00 AM y 1:00 PM
+   └─ Excluye domingos y festivos de Colombia
+
+VER ESTADO DEL SISTEMA:
+   scripts\ver_estado.bat
+
+
+📚 DOCUMENTACIÓN
+═══════════════════════════════════════════════════════════════
+
+README.md                - Descripción completa del proyecto
+GUIA_INSTALACION.md      - Guía detallada paso a paso
+docs\                    - Documentación adicional
+
+
+❓ PROBLEMAS COMUNES
+═══════════════════════════════════════════════════════════════
+
+❌ "Python no está instalado"
+   └─ Descargue desde: https://www.python.org/downloads/
+   └─ Marque "Add Python to PATH" durante instalación
+
+❌ "Credenciales no configuradas"
+   └─ Edite el archivo .env con sus credenciales reales
+   └─ El archivo debe llamarse ".env" (sin .example)
+
+❌ El navegador no se abre
+   └─ Ejecute: playwright install chromium
+
+❌ Marcajes duplicados
+   └─ Ejecute: scripts\SOLUCION_HOY.bat
+
+
+🔧 VERIFICAR INSTALACIÓN
+═══════════════════════════════════════════════════════════════
+
+Para verificar que todo está correcto:
+   scripts\verificar_instalacion.bat
+
+
+🔒 SEGURIDAD
+═══════════════════════════════════════════════════════════════
+
+⚠️  NUNCA comparta el archivo .env con sus credenciales
+⚠️  NUNCA suba el archivo .env a internet o repositorios públicos
+✅  El archivo .gitignore ya protege su .env automáticamente
+
+
+📞 SOPORTE
+═══════════════════════════════════════════════════════════════
+
+Si tiene problemas:
+   1. Revise esta guía
+   2. Ejecute: scripts\verificar_instalacion.bat
+   3. Consulte los logs en: src\logs\
+   4. Abra un issue en GitHub
+
+
+═══════════════════════════════════════════════════════════════
+
+¡Comience ejecutando setup.bat!
+
+═══════════════════════════════════════════════════════════════
