@@ -30,6 +30,9 @@ env/
 .env
 config/employees.json
 
+# Claude Code — configuración local del desarrollador
+.claude/settings.local.json
+
 # Logs
 logs/
 *.log
