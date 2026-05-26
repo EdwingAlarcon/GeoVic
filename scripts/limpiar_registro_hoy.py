@@ -1,68 +1,76 @@
 """
-Script para limpiar el registro de ejecuciones de hoy
-Útil cuando se detectan marcajes incorrectos o duplicados
+Script para limpiar el registro de ejecuciones de hoy.
+Soporta modo single (.env) y multi-empleado (employees.json).
 """
 import json
 import sys
 from datetime import date
 from pathlib import Path
 
-# Obtener la ruta del archivo de registro
-script_dir = Path(__file__).parent.parent / "src" / "logs"
-registro_file = script_dir / "registro_ejecuciones.json"
+LOG_DIR = Path(__file__).parent.parent / "src" / "logs"
+
+
+def obtener_archivos_registro() -> list:
+    """Devuelve todos los archivos de registro existentes."""
+    archivos = []
+    default = LOG_DIR / "registro_ejecuciones.json"
+    if default.exists():
+        archivos.append(default)
+    archivos += sorted(LOG_DIR.glob("registro_*.json"))
+    return list(dict.fromkeys(archivos))  # sin duplicados, orden estable
+
 
 def limpiar_registro_hoy():
-    """Elimina el registro del día de hoy del archivo JSON"""
-    try:
-        if not registro_file.exists():
-            print("ℹ️  Archivo de registro no encontrado")
-            return
-        
-        # Leer el registro actual
-        with open(registro_file, 'r', encoding='utf-8') as f:
-            registro = json.load(f)
-        
-        hoy = date.today().isoformat()
-        
-        if hoy in registro:
-            print(f"📅 Limpiando registro de {hoy}...")
-            print(f"   Marcajes a eliminar:")
-            for tipo_marcaje, datos in registro[hoy].items():
-                print(f"     • {tipo_marcaje}: {datos.get('hora', 'N/A')}")
-            
-            # Eliminar el registro de hoy
-            del registro[hoy]
-            
-            # Guardar el registro actualizado
-            with open(registro_file, 'w', encoding='utf-8') as f:
-                json.dump(registro, f, indent=2, ensure_ascii=False)
-            
-            print(f"\n✅ Registro de {hoy} eliminado exitosamente")
-            print("⚠️  Los marcajes programados se ejecutarán normalmente en sus horarios")
-        else:
-            print(f"ℹ️  No hay registro para {hoy}")
-    
-    except Exception as e:
-        print(f"❌ Error limpiando registro: {e}")
-        sys.exit(1)
+    hoy = date.today().isoformat()
+    archivos = obtener_archivos_registro()
+
+    if not archivos:
+        print("  No hay archivos de registro.")
+        return
+
+    limpiados = 0
+    for archivo in archivos:
+        try:
+            data = json.loads(archivo.read_text(encoding="utf-8"))
+            if hoy in data:
+                emp_id = archivo.stem.replace("registro_", "").replace("ejecuciones", "default")
+                print(f"\n  Empleado: {emp_id} ({archivo.name})")
+                for tipo, datos in data[hoy].items():
+                    print(f"    - {tipo}: {datos.get('hora', 'N/A')}")
+                del data[hoy]
+                archivo.write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+                print(f"    OK registro de {hoy} eliminado")
+                limpiados += 1
+            else:
+                print(f"  Sin registro de hoy en {archivo.name}")
+        except Exception as e:
+            print(f"  Error procesando {archivo.name}: {e}")
+
+    if limpiados > 0:
+        print(f"\n  {limpiados} archivo(s) limpiado(s)")
+        print("  Los marcajes se ejecutaran normalmente en sus horarios")
+    else:
+        print(f"\n  No habia registros de hoy que limpiar")
+
 
 if __name__ == "__main__":
     print("=" * 60)
     print("  LIMPIAR REGISTRO DE EJECUCIONES DE HOY")
     print("=" * 60)
     print()
-    
-    # Si se pasa --auto como argumento, no pedir confirmación
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == '--auto':
-        limpiar_registro_hoy()
-    else:
-        respuesta = input("¿Está seguro que desea eliminar el registro de hoy? (s/N): ")
-        
-        if respuesta.lower() in ['s', 'si', 'sí', 'y', 'yes']:
-            limpiar_registro_hoy()
-        else:
-            print("❌ Operación cancelada")
-        
+
+    auto = len(sys.argv) > 1 and sys.argv[1] == "--auto"
+    if not auto:
+        respuesta = input("Desea eliminar el registro de hoy de TODOS los empleados? (s/N): ")
+        if respuesta.strip().lower() not in ("s", "si", "sí", "y", "yes"):
+            print("Operacion cancelada")
+            input("\nPresione Enter para salir...")
+            sys.exit(0)
+
+    limpiar_registro_hoy()
+
+    if not auto:
         print()
         input("Presione Enter para salir...")

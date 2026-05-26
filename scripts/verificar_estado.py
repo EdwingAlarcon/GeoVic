@@ -1,130 +1,158 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Script para verificar el estado de ejecuciones de marcaje
+Script para verificar el estado de ejecuciones de marcaje.
+Soporta modo single (.env) y multi-empleado (employees.json).
 """
 import json
-import os
 from datetime import date, datetime
 from pathlib import Path
 
-# Paths
 BASE_DIR = Path(__file__).parent.parent
-LOG_DIR = BASE_DIR / "src" / "logs"
-REGISTRO_FILE = LOG_DIR / "registro_ejecuciones.json"
+LOG_DIR  = BASE_DIR / "src" / "logs"
 
-def leer_registro():
-    """Lee el archivo de registro de ejecuciones"""
-    try:
-        if REGISTRO_FILE.exists():
-            with open(REGISTRO_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception as e:
-        print(f"❌ Error leyendo registro: {e}")
-    return {}
+
+def leer_todos_los_registros() -> dict:
+    """
+    Lee registros de TODOS los empleados.
+    Devuelve {emp_id: registro_dict}.
+    """
+    resultados = {}
+
+    # Registro del empleado por defecto (modo .env)
+    default = LOG_DIR / "registro_ejecuciones.json"
+    if default.exists():
+        try:
+            resultados["default"] = json.loads(default.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"  Advertencia leyendo {default.name}: {e}")
+
+    # Registros de empleados adicionales (modo employees.json)
+    for archivo in sorted(LOG_DIR.glob("registro_*.json")):
+        emp_id = archivo.stem.replace("registro_", "")
+        if emp_id not in resultados:
+            try:
+                resultados[emp_id] = json.loads(archivo.read_text(encoding="utf-8"))
+            except Exception as e:
+                print(f"  Advertencia leyendo {archivo.name}: {e}")
+
+    return resultados
+
 
 def mostrar_estado_hoy():
-    """Muestra el estado de marcajes de hoy"""
     hoy = str(date.today())
-    registro = leer_registro()
-    
+    registros = leer_todos_los_registros()
+
     print(f"\n{'=' * 80}")
-    print(f"📊 ESTADO DE MARCAJES GEOVICTORIA")
+    print(f"ESTADO DE MARCAJES GEOVICTORIA")
     print(f"{'=' * 80}")
-    print(f"\n📅 Fecha: {date.today().strftime('%A, %d de %B de %Y')}")
-    print(f"⏰ Hora actual: {datetime.now().strftime('%H:%M:%S')}")
-    
-    if hoy in registro:
-        print(f"\n✅ MARCAJES DE HOY:")
-        print(f"{'-' * 80}")
-        
-        for tipo_marcaje, datos in registro[hoy].items():
-            hora_ejecucion = datetime.fromisoformat(datos['hora'])
-            variacion = datos.get('variacion_minutos', 0)
-            
-            print(f"\n✓ {tipo_marcaje}")
-            print(f"  🕐 Hora: {hora_ejecucion.strftime('%H:%M:%S')}")
-            if variacion != 0:
-                print(f"  🎲 Variación: {variacion:+d} minutos")
-    else:
-        print(f"\n❌ NO HAY MARCAJES REGISTRADOS PARA HOY")
-        print(f"   Posibles razones:")
-        print(f"   • El programador no se ha ejecutado aún")
-        print(f"   • Es día festivo o domingo")
-        print(f"   • Aún no es la hora programada")
-    
+    print(f"\nFecha: {date.today().strftime('%A, %d de %B de %Y')}")
+    print(f"Hora:  {datetime.now().strftime('%H:%M:%S')}")
+
+    if not registros:
+        print("\n  No hay archivos de registro (primer uso del sistema)")
+        return
+
+    total_hoy = 0
+    for emp_id, registro in registros.items():
+        marcajes_hoy = registro.get(hoy, {})
+        if marcajes_hoy:
+            print(f"\n  Empleado: {emp_id}")
+            print(f"  {'-' * 60}")
+            for tipo, datos in marcajes_hoy.items():
+                hora = datetime.fromisoformat(datos["hora"]).strftime("%H:%M:%S")
+                variacion = datos.get("variacion_minutos", 0)
+                var_str = f"  (variacion {variacion:+d} min)" if variacion else ""
+                print(f"    OK  {tipo}")
+                print(f"        Hora: {hora}{var_str}")
+            total_hoy += len(marcajes_hoy)
+
+    if total_hoy == 0:
+        print("\n  No hay marcajes registrados para hoy")
+        print("  Posibles razones:")
+        print("    - El programador no se ha ejecutado aun")
+        print("    - Es dia festivo o domingo")
+        print("    - Aun no es la hora programada")
+
     print(f"\n{'=' * 80}")
 
-def mostrar_ultimos_dias(dias=5):
-    """Muestra resumen de últimos días"""
-    registro = leer_registro()
-    fechas = sorted(registro.keys(), reverse=True)[:dias]
-    
-    print(f"\n📆 HISTORIAL DE ÚLTIMOS {dias} DÍAS:")
+
+def mostrar_ultimos_dias(dias: int = 5):
+    registros = leer_todos_los_registros()
+    if not registros:
+        return
+
+    print(f"\nHISTORIAL ULTIMOS {dias} DIAS:")
     print(f"{'-' * 80}")
-    
-    for fecha in fechas:
-        fecha_obj = datetime.fromisoformat(fecha).date()
-        marcajes = registro[fecha]
-        
-        print(f"\n{fecha_obj.strftime('%A, %d/%m/%Y')}:")
-        for tipo, datos in marcajes.items():
-            hora = datetime.fromisoformat(datos['hora']).strftime('%H:%M')
-            print(f"  ✓ {tipo}: {hora}")
-    
+
+    for emp_id, registro in registros.items():
+        fechas = sorted(registro.keys(), reverse=True)[:dias]
+        if not fechas:
+            continue
+        print(f"\n  Empleado: {emp_id}")
+        for fecha in fechas:
+            try:
+                fecha_obj = datetime.fromisoformat(fecha).date()
+            except ValueError:
+                fecha_obj = fecha
+            print(f"    {fecha_obj}:")
+            for tipo, datos in registro[fecha].items():
+                hora = datetime.fromisoformat(datos["hora"]).strftime("%H:%M")
+                print(f"      - {tipo}: {hora}")
+
     print(f"\n{'-' * 80}")
 
+
 def verificar_logs_hoy():
-    """Verifica si existen logs de hoy"""
-    fecha_log = datetime.now().strftime('%Y%m%d')
+    fecha_log = datetime.now().strftime("%Y%m%d")
     programador_log = LOG_DIR / f"programador_{fecha_log}.log"
     geovictoria_log = LOG_DIR / f"geovictoria_{fecha_log}.log"
-    
-    print(f"\n📋 ARCHIVOS DE LOG:")
-    print(f"{'-' * 80}")
-    
-    if programador_log.exists():
-        size = programador_log.stat().st_size
-        print(f"✓ Programador: {programador_log.name} ({size:,} bytes)")
-        
-        # Buscar mensajes importantes en el log
-        with open(programador_log, 'r', encoding='utf-8') as f:
-            lineas = f.readlines()
-            errores = [l for l in lineas if 'ERROR' in l or 'Error' in l]
-            marcajes = [l for l in lineas if 'completado exitosamente' in l]
-            
-            if errores:
-                print(f"  ⚠️  {len(errores)} error(es) encontrado(s)")
-            if marcajes:
-                print(f"  ✓ {len(marcajes)} marcaje(s) completado(s)")
-    else:
-        print(f"⚠️  Programador: No hay log de hoy")
-    
-    if geovictoria_log.exists():
-        size = geovictoria_log.stat().st_size
-        print(f"✓ GeoVictoria: {geovictoria_log.name} ({size:,} bytes)")
-    else:
-        print(f"⚠️  GeoVictoria: No hay log de hoy")
-    
+    alerta_log      = LOG_DIR / "alertas.log"
+
+    print(f"\nARCHIVOS DE LOG:")
     print(f"{'-' * 80}")
 
+    for log in (programador_log, geovictoria_log):
+        if log.exists():
+            size = log.stat().st_size
+            print(f"  OK  {log.name} ({size:,} bytes)")
+            with open(log, "r", encoding="utf-8") as f:
+                lineas = f.readlines()
+            errores  = [l for l in lineas if "ERROR" in l or "Error" in l]
+            marcajes = [l for l in lineas if "Marcaje completado" in l or "EXITOSO" in l]
+            if errores:
+                print(f"       {len(errores)} error(es) en el log")
+            if marcajes:
+                print(f"       {len(marcajes)} marcaje(s) completado(s)")
+        else:
+            print(f"  --  {log.name} (no existe aun hoy)")
+
+    if alerta_log.exists():
+        size = alerta_log.stat().st_size
+        print(f"\n  ALERTAS: {alerta_log.name} ({size:,} bytes)")
+        lineas = alerta_log.read_text(encoding="utf-8").splitlines()
+        for l in lineas[-5:]:
+            print(f"    {l}")
+    else:
+        print(f"\n  Sin alertas registradas")
+
+    print(f"{'-' * 80}")
+
+
 def main():
-    """Función principal"""
-    print(f"\n🔍 VERIFICADOR DE ESTADO DE MARCAJES")
-    
+    print("\nVERIFICADOR DE ESTADO DE MARCAJES")
     mostrar_estado_hoy()
     mostrar_ultimos_dias(5)
     verificar_logs_hoy()
-    
-    print(f"\n✅ Verificación completada")
-    print(f"\n💡 TIP: Ejecuta este script en cualquier momento para ver el estado\n")
+    print("\nVerificacion completada\n")
+
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print(f"\n\n⚠️  Verificación cancelada por el usuario")
+        print("\n\nVerificacion cancelada")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\nError: {e}")
         import traceback
         traceback.print_exc()

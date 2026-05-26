@@ -43,6 +43,8 @@ log_file = log_dir / f"programador_{datetime.now().strftime('%Y%m%d')}.log"
 _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 _fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8", mode="a")
 _fh.setFormatter(_fmt)
+# Forzar UTF-8 en la consola para que los emojis no rompan en Windows (cp1252)
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 _sh = logging.StreamHandler(sys.stdout)
 _sh.setFormatter(_fmt)
 

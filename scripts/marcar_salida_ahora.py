@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.geovictoria import run, verificar_estado
-from src.programador import guardar_registro_ejecucion
+from src.programador import guardar_registro
 from datetime import date, datetime
 
 async def marcar_salida_emergencia():
@@ -46,9 +46,9 @@ async def marcar_salida_emergencia():
             else:
                 tipo_marcaje = "SALIDA SEMANA (L-V)"
             
-            # Registrar en el sistema
+            # Registrar en el sistema (empleado por defecto = .env)
             print(f"💾 Registrando en sistema: {tipo_marcaje}")
-            guardar_registro_ejecucion(tipo_marcaje, variacion_minutos=0)
+            guardar_registro("default", tipo_marcaje, variacion_minutos=0)
             
             print("\n" + "=" * 80)
             print("✅ PROCESO COMPLETADO EXITOSAMENTE")
