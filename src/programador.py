@@ -519,6 +519,12 @@ def job_listener(event) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # Redirigir stderr al log para capturar excepciones no manejadas
+    try:
+        sys.stderr = open(log_file, "a", encoding="utf-8", errors="replace")
+    except Exception:
+        pass  # Si falla, seguir con stderr original
+
     crear_lock_file()
     atexit.register(eliminar_lock_file)
 
@@ -547,20 +553,31 @@ def main() -> None:
     # Verificar pendientes al inicio (caso PC iniciado tarde)
     logger.info("\n🔍 Verificando marcajes pendientes al inicio...")
     for emp in empleados:
-        verificar_pendientes_emp(emp)
+        try:
+            verificar_pendientes_emp(emp)
+        except Exception as e:
+            logger.error(f"❌ Error verificando pendientes de {emp.get('nombre', emp.get('id'))}: {e}", exc_info=True)
 
     # Crear y configurar scheduler
     scheduler = BlockingScheduler(timezone="America/Bogota")
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     for emp in empleados:
-        configurar_trabajos_empleado(scheduler, emp)
+        try:
+            configurar_trabajos_empleado(scheduler, emp)
+        except Exception as e:
+            logger.error(f"❌ Error configurando trabajos de {emp.get('nombre', emp.get('id'))}: {e}", exc_info=True)
 
-    logger.info("\n📋 TRABAJOS PROGRAMADOS:")
+    # Nota: get_jobs() devuelve lista vacía antes de start() (APScheduler guarda
+    # los jobs en _pending_jobs hasta que arranca). Mostramos la config manual.
+    logger.info("\n📋 TRABAJOS CONFIGURADOS (se activan al arrancar):")
     logger.info("=" * 80)
-    for job in scheduler.get_jobs():
-        next_run = job.next_run_time.strftime("%Y-%m-%d %H:%M:%S") if job.next_run_time else "N/A"
-        logger.info(f"  ✓ {job.name:50} | Próximo: {next_run}")
+    for emp in empleados:
+        h = emp["horario"]
+        logger.info(f"  [{emp['id']}] {emp['nombre']}")
+        logger.info(f"       Entrada L-V: {h['entrada_semana_hora']:02d}:{h['entrada_semana_minuto']:02d}  |  Salida L-V: {h['salida_semana_hora']:02d}:{h['salida_semana_minuto']:02d}")
+        if h.get("trabaja_sabados", True):
+            logger.info(f"       Entrada Sab: {h['entrada_sabado_hora']:02d}:{h['entrada_sabado_minuto']:02d}  |  Salida Sab: {h['salida_sabado_hora']:02d}:{h['salida_sabado_minuto']:02d}")
     logger.info("=" * 80)
 
     logger.info(f"\n⏰ Programador activo con {len(empleados)} empleado(s). Ctrl+C para detener.\n")
@@ -568,9 +585,28 @@ def main() -> None:
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
-        logger.info("\n👋 Programador detenido")
+        logger.info("\n👋 Programador detenido por el usuario")
         logger.info("=" * 80)
+    except Exception as e:
+        logger.error(f"❌ Error inesperado en el scheduler: {e}", exc_info=True)
+        logger.error("❌ El programador se detuvo inesperadamente — revisar el log")
+        raise
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    except Exception as e:
+        # Último recurso: loguear al archivo directamente
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                import traceback
+                f.write(f"\n{'='*80}\n")
+                f.write(f"EXCEPCION FATAL EN main():\n")
+                f.write(traceback.format_exc())
+                f.write(f"{'='*80}\n")
+        except Exception:
+            pass
+        sys.exit(1)
