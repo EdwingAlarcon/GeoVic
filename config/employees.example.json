@@ -1,0 +1,40 @@
+{
+  "employees": [
+    {
+      "id": "emp1",
+      "nombre": "Empleado Uno",
+      "usuario": "usuario_geovictoria_1",
+      "password": "contraseña_1",
+      "activo": true,
+      "horario": {
+        "entrada_semana_hora": 7,
+        "entrada_semana_minuto": 0,
+        "salida_semana_hora": 17,
+        "salida_semana_minuto": 0,
+        "entrada_sabado_hora": 7,
+        "entrada_sabado_minuto": 0,
+        "salida_sabado_hora": 13,
+        "salida_sabado_minuto": 0,
+        "trabaja_sabados": true
+      }
+    },
+    {
+      "id": "emp2",
+      "nombre": "Empleado Dos",
+      "usuario": "usuario_geovictoria_2",
+      "password": "contraseña_2",
+      "activo": true,
+      "horario": {
+        "entrada_semana_hora": 8,
+        "entrada_semana_minuto": 0,
+        "salida_semana_hora": 18,
+        "salida_semana_minuto": 0,
+        "entrada_sabado_hora": 8,
+        "entrada_sabado_minuto": 0,
+        "salida_sabado_hora": 13,
+        "salida_sabado_minuto": 0,
+        "trabaja_sabados": false
+      }
+    }
+  ]
+}

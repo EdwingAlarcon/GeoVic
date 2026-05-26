@@ -28,6 +28,7 @@ env/
 
 # Credenciales y configuración sensible
 .env
+config/employees.json
 
 # Logs
 logs/

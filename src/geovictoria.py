@@ -1,358 +1,318 @@
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-from dotenv import load_dotenv
+from typing import Dict, Optional
 
-# Configuración
+from dotenv import load_dotenv
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+
+
 class Config:
     LOGIN_URL = "https://clients.geovictoria.com/account/login?ReturnUrl=%2f"
     IFRAME_DOMAIN = "gvportal.geovictoria.com"
-    IFRAME_TIMEOUT = 30000  # Reducido de 60s a 30s
+    IFRAME_TIMEOUT = 30000
     BUTTON_TIMEOUT = 5000
-    MAX_RETRIES = 2  # Reducido de 3 a 2 para más rapidez
-    RETRY_DELAY = 1  # Reducido de 2s a 1s
+    MAX_RETRIES = 2
+    RETRY_DELAY = 1
     HEADLESS = False
-    LOGIN_TIMEOUT = 10000  # Timeout específico para login
+    LOGIN_TIMEOUT = 10000
 
-# Configurar logging
+
+# --- Selectores CSS desde config/selectors.json ---
+_selectors_path = Path(__file__).parent.parent / "config" / "selectors.json"
+try:
+    with open(_selectors_path, "r", encoding="utf-8") as _f:
+        _SEL = json.load(_f)
+except (FileNotFoundError, json.JSONDecodeError):
+    _SEL = {
+        "login": {"username": "#user", "password": "input[type='password']"},
+        "attendance": {"btn_entrada": "text=Marcar Entrada", "btn_salida": "text=Marcar Salida"},
+    }
+
+# --- Logging con rotación (5 MB x 5 archivos) ---
 log_dir = Path(__file__).parent / "logs"
 log_dir.mkdir(exist_ok=True)
 log_file = log_dir / f"geovictoria_{datetime.now().strftime('%Y%m%d')}.log"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+_fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+_fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+_fh.setFormatter(_fmt)
+_sh = logging.StreamHandler()
+_sh.setFormatter(_fmt)
+
+logging.basicConfig(level=logging.INFO, handlers=[_fh, _sh])
 logger = logging.getLogger(__name__)
 
-# Cargar variables de entorno
 load_dotenv()
 
-def get_credentials():
-    """Obtiene credenciales desde variables de entorno o archivo .env"""
+
+def _tag(empleado: Optional[Dict]) -> str:
+    """Prefijo de log para identificar el empleado en modo multi-empleado."""
+    if empleado and empleado.get("id", "default") != "default":
+        return f"[{empleado['nombre']}] "
+    return ""
+
+
+def get_credentials(empleado: Optional[Dict] = None):
+    """Obtiene credenciales desde el dict de empleado o desde variables de entorno."""
+    if empleado:
+        return empleado["usuario"], empleado["password"]
+
     usuario = os.getenv("GEOVICTORIA_USER")
     password = os.getenv("GEOVICTORIA_PASSWORD")
-    
     if not usuario or not password:
         logger.error("❌ Credenciales no encontradas. Configure GEOVICTORIA_USER y GEOVICTORIA_PASSWORD")
-        logger.info("💡 Cree un archivo .env con:")
-        logger.info("   GEOVICTORIA_USER=su_usuario")
-        logger.info("   GEOVICTORIA_PASSWORD=su_contraseña")
         raise ValueError("Credenciales no configuradas")
-    
     return usuario, password
 
-async def wait_for_iframe(page, max_retries=2):
-    """Espera y busca el iframe con reintentos optimizados"""
+
+async def wait_for_iframe(page, tag: str = "", max_retries: int = 2):
+    """Espera y busca el iframe con reintentos."""
     for attempt in range(1, max_retries + 1):
         try:
-            if attempt == 1:
-                logger.debug(f"Buscando iframe...")
-            else:
-                logger.info(f"Reintentando buscar iframe ({attempt}/{max_retries})...")
-            
-            # Intentar esperar a que la página cargue (con timeout tolerable)
+            if attempt > 1:
+                logger.info(f"{tag}Reintentando iframe ({attempt}/{max_retries})...")
+
             try:
                 await page.wait_for_load_state("networkidle", timeout=10000)
-                logger.debug("Página cargada (networkidle)")
             except PlaywrightTimeoutError:
-                logger.debug("Timeout esperando networkidle, continuando...")
-            
-            # Esperar más tiempo para que los iframes se carguen
+                pass
+
             await asyncio.sleep(4)
-            
-            # Log de qué frames hay disponibles
+
             frames_urls = [f.url for f in page.frames]
-            logger.info(f"Frames disponibles en intento {attempt}: {len(page.frames)}")
+            logger.info(f"{tag}Frames disponibles (intento {attempt}): {len(page.frames)}")
             for idx, url in enumerate(frames_urls):
-                logger.info(f"  Frame {idx}: {url}")
-            
-            # Buscar iframe gvportal directamente por URL
+                logger.info(f"{tag}  Frame {idx}: {url}")
+
             for frame in page.frames:
                 if Config.IFRAME_DOMAIN in frame.url:
-                    logger.info(f"✅ Iframe encontrado: {frame.url}")
+                    logger.info(f"{tag}✅ Iframe encontrado: {frame.url}")
                     return frame
-            
-            # Si no se encontró, intentar esperar más tiempo
+
             if attempt < max_retries:
-                logger.warning(f"Iframe gvportal no encontrado en intento {attempt}, esperando...")
+                logger.warning(f"{tag}Iframe no encontrado en intento {attempt}, reintentando...")
                 await asyncio.sleep(3)
-                
+
         except Exception as e:
-            logger.warning(f"⚠️ Error buscando iframe en intento {attempt}: {e}")
+            logger.warning(f"{tag}⚠️ Error buscando iframe (intento {attempt}): {e}")
             if attempt < max_retries:
                 await asyncio.sleep(Config.RETRY_DELAY)
-    
-    # Log de diagnóstico final
+
     try:
         frames_urls = [f.url for f in page.frames]
-        logger.error(f"❌ No se encontró iframe después de {max_retries} intentos")
-        logger.error(f"Frames finales: {frames_urls}")
-    except Exception as e:
-        logger.error(f"❌ No se encontró iframe. Error al listar frames: {e}")
-    
+        logger.error(f"{tag}❌ Iframe no encontrado tras {max_retries} intentos. Frames: {frames_urls}")
+    except Exception:
+        logger.error(f"{tag}❌ Iframe no encontrado tras {max_retries} intentos")
+
     return None
 
-async def login(page, usuario, password):
-    """Realiza el login con manejo optimizado de errores"""
+
+async def login(page, usuario: str, password: str, tag: str = "") -> bool:
+    """Realiza el login usando selectores configurables."""
     try:
-        logger.debug("Navegando a página de login...")
+        logger.debug(f"{tag}Navegando a login...")
         await page.goto(Config.LOGIN_URL, wait_until="domcontentloaded")
-        
-        # Verificar si nos redirigió a "browsernotsupported"
+
         if "browsernotsupported" in page.url:
-            logger.error("❌ GeoVictoria detectó navegador no soportado")
-            logger.error(f"   URL actual: {page.url}")
-            logger.error("   Esto puede resolverse usando un navegador no-headless")
+            logger.error(f"{tag}❌ GeoVictoria detectó navegador no soportado")
             return False
-        
-        logger.debug("Completando formulario de login...")
-        await page.fill("#user", usuario)
-        await page.fill("input[type='password']", password)
+
+        await page.fill(_SEL["login"]["username"], usuario)
+        await page.fill(_SEL["login"]["password"], password)
         await page.keyboard.press("Enter")
-        
-        logger.debug("Esperando confirmación de login...")
+
         await page.wait_for_url(lambda url: "login" not in url, timeout=Config.LOGIN_TIMEOUT)
-        
-        # Verificar otra vez después del login
+
         if "browsernotsupported" in page.url:
-            logger.error("❌ Redirigido a browsernotsupported después del login")
+            logger.error(f"{tag}❌ Redirigido a browsernotsupported tras login")
             return False
-        
-        logger.debug("✅ Login exitoso")
+
+        logger.debug(f"{tag}✅ Login exitoso")
         return True
-        
+
     except PlaywrightTimeoutError:
-        logger.error("❌ Timeout durante login - Verifique credenciales y conexión")
+        logger.error(f"{tag}❌ Timeout en login - Verifique credenciales y conexión")
         return False
     except Exception as e:
-        logger.error(f"❌ Error durante login: {e}")
+        logger.error(f"{tag}❌ Error en login: {e}")
         return False
 
-async def verificar_boton_disponible(target_frame):
-    """Verifica qué botón está disponible sin ejecutar marcaje"""
+
+async def verificar_boton_disponible(target_frame, tag: str = "") -> Optional[str]:
+    """Verifica qué botón de marcaje está disponible sin ejecutarlo."""
     try:
-        # Verificar si está disponible Marcar Entrada
-        btn_entry = target_frame.locator("text=Marcar Entrada")
-        await btn_entry.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.debug("🔍 Botón disponible: Marcar Entrada")
+        btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
+        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.debug(f"{tag}🔍 Botón disponible: Marcar Entrada")
         return "Entrada"
     except PlaywrightTimeoutError:
         pass
-    
+
     try:
-        # Verificar si está disponible Marcar Salida
-        btn_exit = target_frame.locator("text=Marcar Salida")
-        await btn_exit.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.debug("🔍 Botón disponible: Marcar Salida")
+        btn = target_frame.locator(_SEL["attendance"]["btn_salida"])
+        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.debug(f"{tag}🔍 Botón disponible: Marcar Salida")
         return "Salida"
     except PlaywrightTimeoutError:
         pass
-    
-    logger.warning("⚠️ Ningún botón de marcaje disponible")
+
+    logger.warning(f"{tag}⚠️ Ningún botón de marcaje disponible")
     return None
 
-async def marcar_asistencia(target_frame):
-    """Intenta marcar entrada o salida con validación optimizada"""
-    accion = None
-    
-    try:
-        # Intentar marcar entrada
-        logger.debug("Buscando botón 'Marcar Entrada'...")
-        btn_entry = target_frame.locator("text=Marcar Entrada")
-        await btn_entry.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        
-        logger.info("Haciendo clic en 'Marcar Entrada'...")
-        await btn_entry.click(force=True)
-        accion = "Entrada"
-        
-        # Esperar confirmación visual (reducido de 2s a 1s)
-        await asyncio.sleep(1)
-        logger.info("✅ Marcaje de Entrada realizado")
-        
-    except PlaywrightTimeoutError:
-        logger.debug("Botón 'Marcar Entrada' no disponible, intentando Salida...")
-        
-        try:
-            # Intentar marcar salida
-            btn_exit = target_frame.locator("text=Marcar Salida")
-            await btn_exit.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-            
-            logger.info("Haciendo clic en 'Marcar Salida'...")
-            await btn_exit.click(force=True)
-            accion = "Salida"
-            
-            # Esperar confirmación visual (reducido de 2s a 1s)
-            await asyncio.sleep(1)
-            logger.info("✅ Marcaje de Salida realizado")
-            
-        except PlaywrightTimeoutError:
-            logger.warning("❌ Ningún botón de marcaje disponible")
-        except Exception as e:
-            logger.error(f"❌ Error al marcar salida: {e}")
-            
-    except Exception as e:
-        logger.error(f"❌ Error al marcar entrada: {e}")
-    
-    return accion
 
-async def verificar_estado():
-    """Verifica qué botón está disponible en GeoVictoria sin ejecutar marcaje"""
-    browser = None
-    boton_disponible = None
-    
+async def marcar_asistencia(target_frame, tag: str = "") -> Optional[str]:
+    """Ejecuta el marcaje de entrada o salida."""
     try:
-        # Obtener credenciales
-        usuario, password = get_credentials()
-        logger.debug("🔍 Verificando estado en GeoVictoria...")
-        
-        # Iniciar navegador con configuración mejorada
+        btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
+        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.info(f"{tag}Haciendo clic en 'Marcar Entrada'...")
+        await btn.click(force=True)
+        await asyncio.sleep(1)
+        logger.info(f"{tag}✅ Marcaje de Entrada realizado")
+        return "Entrada"
+
+    except PlaywrightTimeoutError:
+        pass
+
+    try:
+        btn = target_frame.locator(_SEL["attendance"]["btn_salida"])
+        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.info(f"{tag}Haciendo clic en 'Marcar Salida'...")
+        await btn.click(force=True)
+        await asyncio.sleep(1)
+        logger.info(f"{tag}✅ Marcaje de Salida realizado")
+        return "Salida"
+
+    except PlaywrightTimeoutError:
+        logger.warning(f"{tag}❌ Ningún botón de marcaje disponible")
+    except Exception as e:
+        logger.error(f"{tag}❌ Error al marcar salida: {e}")
+
+    return None
+
+
+def _crear_contexto_browser():
+    """Parámetros comunes del contexto de navegador."""
+    return {
+        "viewport": {"width": 1920, "height": 1080},
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "locale": "es-CO",
+        "timezone_id": "America/Bogota",
+    }
+
+
+async def verificar_estado(empleado: Optional[Dict] = None) -> Optional[str]:
+    """Verifica qué botón está disponible en GeoVictoria sin ejecutar marcaje."""
+    tag = _tag(empleado)
+    try:
+        usuario, password = get_credentials(empleado)
+        logger.debug(f"{tag}🔍 Verificando estado...")
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(
-                headless=False,  # Usar navegador visible para evitar detección
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                    '--no-sandbox'
-                ]
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-sandbox"],
             )
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                locale='es-CO',
-                timezone_id='America/Bogota'
+            context = await browser.new_context(**_crear_contexto_browser())
+            await context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
-            # Ocultar que es un navegador automatizado
-            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
             page = await context.new_page()
-            
-            # Login
-            if not await login(page, usuario, password):
-                logger.error("❌ Fallo en el proceso de login")
-                return None
-            
-            # Buscar iframe
-            target_frame = await wait_for_iframe(page, max_retries=Config.MAX_RETRIES)
-            
-            if not target_frame:
-                logger.error("❌ No se pudo encontrar el iframe")
-                return None
-            
-            # Verificar qué botón está disponible
-            boton_disponible = await verificar_boton_disponible(target_frame)
-            
-    except Exception as e:
-        logger.error(f"❌ Error verificando estado: {e}")
-    finally:
-        if browser:
-            await browser.close()
-    
-    return boton_disponible
 
-async def run(accion_esperada=None):
-    """Función principal con manejo optimizado de errores
-    
+            try:
+                if not await login(page, usuario, password, tag=tag):
+                    return None
+
+                target_frame = await wait_for_iframe(page, tag=tag, max_retries=Config.MAX_RETRIES)
+                if not target_frame:
+                    return None
+
+                return await verificar_boton_disponible(target_frame, tag=tag)
+            finally:
+                await browser.close()
+
+    except Exception as e:
+        logger.error(f"{tag}❌ Error verificando estado: {e}")
+        return None
+
+
+async def run(accion_esperada: Optional[str] = None, empleado: Optional[Dict] = None) -> Optional[str]:
+    """
+    Ejecuta el marcaje de asistencia.
+
     Args:
         accion_esperada: "Entrada" o "Salida". Si se especifica, solo ejecuta si coincide.
-                        Si es None, ejecuta lo que esté disponible (modo manual).
+                         None = ejecuta lo que esté disponible (modo manual).
+        empleado: Dict de configuración del empleado. None = usa variables de entorno.
     """
-    browser = None
+    tag = _tag(empleado)
     accion = None
-    
+
     try:
-        # Obtener credenciales
-        usuario, password = get_credentials()
+        usuario, password = get_credentials(empleado)
         logger.info("=" * 60)
-        logger.info(f"Iniciando marcaje automático GeoVictoria")
-        logger.info(f"Usuario: {usuario}")
+        logger.info(f"{tag}Iniciando marcaje GeoVictoria")
+        logger.info(f"{tag}Usuario: {usuario}")
         if accion_esperada:
-            logger.info(f"Acción esperada: {accion_esperada}")
+            logger.info(f"{tag}Acción esperada: {accion_esperada}")
         logger.info("=" * 60)
-        
-        # Iniciar navegador con configuración mejorada
+
         async with async_playwright() as p:
-            logger.debug("Iniciando navegador...")
             browser = await p.chromium.launch(
                 headless=Config.HEADLESS,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                    '--no-sandbox'
-                ]
+                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-sandbox"],
             )
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                locale='es-CO',
-                timezone_id='America/Bogota'
+            context = await browser.new_context(**_crear_contexto_browser())
+            await context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
-            # Ocultar que es un navegador automatizado
-            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
             page = await context.new_page()
-            
-            # Login
-            if not await login(page, usuario, password):
-                logger.error("❌ Fallo en el proceso de login")
-                return None
-            
-            # Buscar iframe con reintentos
-            target_frame = await wait_for_iframe(page, max_retries=Config.MAX_RETRIES)
-            
-            if not target_frame:
-                logger.error("❌ No se pudo encontrar el iframe")
-                return None
-            
-            # Si se especifica acción esperada, validar primero
-            if accion_esperada:
-                boton_disponible = await verificar_boton_disponible(target_frame)
-                
-                if boton_disponible != accion_esperada:
-                    logger.warning("=" * 60)
-                    logger.warning(f"⚠️ VALIDACIÓN FALLIDA")
-                    logger.warning(f"   • Acción esperada: {accion_esperada}")
-                    logger.warning(f"   • Botón disponible: {boton_disponible or 'Ninguno'}")
-                    logger.warning(f"   • NO se ejecutará el marcaje")
-                    logger.warning("=" * 60)
+
+            try:
+                if not await login(page, usuario, password, tag=tag):
+                    logger.error(f"{tag}❌ Fallo en login")
                     return None
-                
-                logger.debug(f"✅ Validación OK: Botón '{boton_disponible}' coincide")
-            
-            # Marcar asistencia
-            accion = await marcar_asistencia(target_frame)
-            
-            if accion:
-                logger.info("=" * 60)
-                logger.info(f"✅ MARCAJE EXITOSO: {accion}")
-                logger.info(f"Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                logger.info("=" * 60)
-            else:
-                logger.warning("=" * 60)
-                logger.warning("⚠️ NO SE REALIZÓ MARCAJE")
-                logger.warning("No se encontró botón de Entrada ni Salida disponible")
-                logger.warning("=" * 60)
-            
-            # Mantener navegador abierto brevemente solo si no es headless
-            if not Config.HEADLESS and accion:
-                await asyncio.sleep(2)
-            
+
+                target_frame = await wait_for_iframe(page, tag=tag, max_retries=Config.MAX_RETRIES)
+                if not target_frame:
+                    logger.error(f"{tag}❌ No se encontró el iframe")
+                    return None
+
+                if accion_esperada:
+                    boton_disponible = await verificar_boton_disponible(target_frame, tag=tag)
+                    if boton_disponible != accion_esperada:
+                        logger.warning(f"{tag}⚠️ Validación fallida: esperado='{accion_esperada}', disponible='{boton_disponible or 'Ninguno'}' - No se ejecutará")
+                        return None
+
+                accion = await marcar_asistencia(target_frame, tag=tag)
+
+                if accion:
+                    logger.info(f"{tag}✅ MARCAJE EXITOSO: {accion} | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    logger.warning(f"{tag}⚠️ NO SE REALIZÓ MARCAJE - Sin botones disponibles")
+
+                if not Config.HEADLESS and accion:
+                    await asyncio.sleep(2)
+
+            finally:
+                await browser.close()
+
     except ValueError as e:
-        logger.error(f"❌ Error de configuración: {e}")
+        logger.error(f"{tag}❌ Error de configuración: {e}")
     except Exception as e:
-        logger.error(f"❌ Error inesperado: {e}", exc_info=True)
-    finally:
-        if browser:
-            await browser.close()
-    
+        logger.error(f"{tag}❌ Error inesperado: {e}", exc_info=True)
+
     return accion
+
 
 if __name__ == "__main__":
     asyncio.run(run())

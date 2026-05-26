@@ -1,0 +1,10 @@
+{
+  "login": {
+    "username": "#user",
+    "password": "input[type='password']"
+  },
+  "attendance": {
+    "btn_entrada": "text=Marcar Entrada",
+    "btn_salida": "text=Marcar Salida"
+  }
+}
