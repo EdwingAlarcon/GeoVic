@@ -6,7 +6,15 @@ echo ===========================================================================
 echo.
 
 cd /d "%~dp0.."
-python scripts\verificar_lock_obsoleto.py
+
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    set PYTHON=python
+)
+
+%PYTHON% scripts\verificar_lock_obsoleto.py
 
 if %ERRORLEVEL% EQU 0 (
     echo.

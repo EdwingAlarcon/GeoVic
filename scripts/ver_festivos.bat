@@ -1,6 +1,5 @@
 @echo off
-REM Script para ver los festivos de Colombia del año actual
-
+chcp 65001 >nul
 echo ================================================
 echo   FESTIVOS DE COLOMBIA
 echo ================================================
@@ -8,7 +7,14 @@ echo.
 
 cd /d "%~dp0\.."
 
-python src\festivos_colombia.py
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    set PYTHON=python
+)
+
+%PYTHON% src\festivos_colombia.py
 
 echo.
 pause

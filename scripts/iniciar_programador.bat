@@ -1,7 +1,5 @@
 @echo off
-REM Script para ejecutar el programador de marcajes GeoVictoria
-REM Este archivo mantiene el programador corriendo en segundo plano
-
+chcp 65001 >nul
 echo ================================================
 echo   PROGRAMADOR DE MARCAJES GEOVICTORIA
 echo   Configurado para Colombia
@@ -10,20 +8,30 @@ echo.
 
 cd /d "%~dp0\.."
 
-REM Verificar que existe el archivo .env
-if not exist ".env" (
-    echo ERROR: Archivo .env no encontrado
-    echo Por favor configure sus credenciales primero
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+    echo [OK] Usando Python del entorno virtual (.venv)
+) else (
+    set PYTHON=python
+    echo [WARN] Entorno virtual no encontrado, usando Python del sistema
+)
+echo.
+
+REM Verificar credenciales (.env o employees.json)
+if not exist ".env" if not exist "config\employees.json" (
+    echo ERROR: No se encontraron credenciales.
+    echo Configure .env con GEOVICTORIA_USER y GEOVICTORIA_PASSWORD
+    echo o cree config\employees.json con la lista de empleados.
     echo.
     pause
     exit /b 1
 )
 
-REM Ejecutar el programador
 echo Iniciando programador...
 echo Presione Ctrl+C para detener
 echo.
 
-python src\programador.py
+%PYTHON% src\programador.py
 
 pause

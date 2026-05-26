@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo ========================================
 echo   CORRECCION COMPLETA DEL PROBLEMA
 echo   Marcajes Multiples Duplicados
@@ -11,6 +12,15 @@ echo   3. Limpiar registro de marcajes de HOY
 echo   4. Iniciar UNA SOLA instancia del programador
 echo.
 pause
+
+cd /d "%~dp0\.."
+
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    set PYTHON=python
+)
 
 REM ============================================
 REM 1. DETENER PROCESOS (requiere permisos admin)
@@ -58,7 +68,7 @@ REM 3. LIMPIAR REGISTRO DE HOY
 REM ============================================
 echo.
 echo [3/4] Limpiando registro de marcajes de hoy...
-python scripts\limpiar_registro_hoy.py
+%PYTHON% scripts\limpiar_registro_hoy.py
 if errorlevel 1 (
     echo [ADVERTENCIA] Error limpiando registro
 ) else (
@@ -106,7 +116,7 @@ echo ========================================
 echo.
 timeout /t 3 >nul
 
-start "Programador GeoVictoria" cmd /k "cd /d "%~dp0\.." && python src\programador.py"
+start "Programador GeoVictoria" cmd /k "%PYTHON% src\programador.py"
 
 echo.
 echo ========================================

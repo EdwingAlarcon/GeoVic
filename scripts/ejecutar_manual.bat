@@ -1,7 +1,5 @@
 @echo off
-REM Script para ejecutar un marcaje manual único
-REM Útil para pruebas o marcajes ocasionales
-
+chcp 65001 >nul
 echo ================================================
 echo   MARCAJE MANUAL GEOVICTORIA
 echo ================================================
@@ -9,20 +7,29 @@ echo.
 
 cd /d "%~dp0\.."
 
-REM Verificar que existe el archivo .env
-if not exist ".env" (
-    echo ERROR: Archivo .env no encontrado
-    echo Por favor configure sus credenciales primero
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+    echo [OK] Usando Python del entorno virtual (.venv)
+) else (
+    set PYTHON=python
+    echo [WARN] Entorno virtual no encontrado, usando Python del sistema
+)
+echo.
+
+REM Verificar credenciales
+if not exist ".env" if not exist "config\employees.json" (
+    echo ERROR: No se encontraron credenciales.
+    echo Configure .env o cree config\employees.json
     echo.
     pause
     exit /b 1
 )
 
-REM Ejecutar marcaje único
 echo Ejecutando marcaje manual...
 echo.
 
-python src\geovictoria.py
+%PYTHON% src\geovictoria.py
 
 echo.
 echo ================================================

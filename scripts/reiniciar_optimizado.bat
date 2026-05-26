@@ -27,7 +27,15 @@ timeout /t 3 /nobreak >nul
 echo.
 echo 🚀 Iniciando programador OPTIMIZADO...
 cd /d "%~dp0.."
-start "GeoVictoria [OPTIMIZADO v2.0]" python src/programador.py
+
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    set PYTHON=python
+)
+
+start "GeoVictoria [OPTIMIZADO v2.0]" %PYTHON% src/programador.py
 
 echo.
 echo ✅ Programador optimizado iniciado

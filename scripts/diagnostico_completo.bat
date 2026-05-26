@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ================================================================================
@@ -6,6 +7,15 @@ echo   DIAGNOSTICO COMPLETO GEOVICTORIA
 echo   Fecha: %date% %time%
 echo ================================================================================
 echo.
+
+cd /d "%~dp0\.."
+
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    set PYTHON=python
+)
 
 REM ============================================================================
 REM 1. VERIFICAR PROCESOS
@@ -92,7 +102,7 @@ if exist "src\logs\registro_ejecuciones.json" (
     echo.
     echo     Ultimas ejecuciones:
     echo     ----------------------------------------
-    python -c "import json; f=open('src/logs/registro_ejecuciones.json','r',encoding='utf-8'); data=json.load(f); f.close(); import sys; [print(f'     {fecha}: {list(marcajes.keys())}') for fecha, marcajes in sorted(data.items(), reverse=True)[:7]]" 2>NUL
+    %PYTHON% -c "import json; f=open('src/logs/registro_ejecuciones.json','r',encoding='utf-8'); data=json.load(f); f.close(); import sys; [print(f'     {fecha}: {list(marcajes.keys())}') for fecha, marcajes in sorted(data.items(), reverse=True)[:7]]" 2>NUL
     if errorlevel 1 (
         echo     [ERROR] No se pudo leer el archivo JSON
         echo     [SOLUCION] El archivo puede estar corrupto
@@ -108,7 +118,7 @@ REM 5. VERIFICAR ESTADO EN GEOVICTORIA
 REM ============================================================================
 echo [5/6] Verificando estado actual en GeoVictoria...
 echo ----------------------------------------
-python scripts\verificar_estado.py
+%PYTHON% scripts\verificar_estado.py
 echo.
 
 REM ============================================================================
@@ -117,7 +127,7 @@ REM ============================================================================
 echo [6/6] Verificando dependencias de Python...
 echo ----------------------------------------
 
-python -c "import playwright" 2>NUL
+%PYTHON% -c "import playwright" 2>NUL
 if errorlevel 1 (
     echo     [ERROR] playwright NO instalado
     echo     [SOLUCION] pip install playwright ^&^& playwright install chromium
@@ -125,7 +135,7 @@ if errorlevel 1 (
     echo     [OK] playwright instalado
 )
 
-python -c "import dotenv" 2>NUL
+%PYTHON% -c "import dotenv" 2>NUL
 if errorlevel 1 (
     echo     [ERROR] python-dotenv NO instalado
     echo     [SOLUCION] pip install python-dotenv
@@ -133,7 +143,7 @@ if errorlevel 1 (
     echo     [OK] python-dotenv instalado
 )
 
-python -c "import apscheduler" 2>NUL
+%PYTHON% -c "import apscheduler" 2>NUL
 if errorlevel 1 (
     echo     [ERROR] apscheduler NO instalado
     echo     [SOLUCION] pip install apscheduler

@@ -1,16 +1,21 @@
 @echo off
+chcp 65001 >nul
 echo ========================================
-echo DIAGNOSTICO DEL SISTEMA DE MARCAJES
+echo   DIAGNOSTICO DEL SISTEMA DE MARCAJES
 echo ========================================
-echo.
-echo Verificando estado actual del sistema...
 echo.
 
 cd /d "%~dp0\.."
 
-python scripts\diagnostico_estado_completo.py
+REM --- Detectar Python: venv si existe, sino sistema ---
+if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    set PYTHON=python
+)
+
+%PYTHON% scripts\diagnostico_estado_completo.py
 
 echo.
 echo ========================================
-echo Presione cualquier tecla para salir...
-pause >nul
+pause
