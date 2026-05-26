@@ -393,6 +393,9 @@ class Config:
 - 📖 [Ver toda la documentación](docs/README.md) - Índice completo de documentos
 - 📖 [Scripts Disponibles](scripts/README.md) - Lista completa de scripts
 
+### 🤖 Desarrollo
+- 📖 [CLAUDE.md](CLAUDE.md) - Guía de arquitectura y comandos para Claude Code
+
 ---
 
 **Desarrollado para Colombia 🇨🇴**
