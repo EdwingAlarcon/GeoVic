@@ -80,7 +80,7 @@ scripts\verificar_instalacion.bat
 - ✅ `scripts/ver_estado.bat` - Ver estado del sistema
 - ✅ `scripts/verificar_instalacion.bat` - Verificar instalación
 - ✅ `scripts/ver_festivos.bat` - Listar festivos de Colombia
-- ✅ `scripts/SOLUCION_HOY.bat` - Limpiar marcajes duplicados
+- ✅ `scripts/limpiar_registro_hoy.bat` - Limpiar registro del día actual
 
 ### 📦 Exportación
 - ✅ `exportar_proyecto.bat` - Crear ZIP para distribución
@@ -264,7 +264,7 @@ Editar archivo .env con credenciales reales
 
 **Marcajes duplicados:**
 ```bash
-scripts\SOLUCION_HOY.bat
+scripts\limpiar_registro_hoy.bat
 ```
 
 ---

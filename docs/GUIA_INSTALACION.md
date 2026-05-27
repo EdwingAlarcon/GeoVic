@@ -188,10 +188,10 @@ playwright install chromium
 ### Marcajes duplicados
 
 ```batch
-scripts\SOLUCION_HOY.bat
+scripts\limpiar_registro_hoy.bat
 ```
 
-Este script limpiará los marcajes del día actual.
+Este script limpiará el registro del día actual.
 
 ## 📚 Documentación Adicional
 

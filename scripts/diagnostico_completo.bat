@@ -172,7 +172,7 @@ if !PROCESO_ENCONTRADO!==0 (
 echo Para mas informacion sobre configuracion:
 echo   - Ver: CONFIGURAR_TAREA_WINDOWS.md
 echo   - Logs en: src\logs\
-echo   - Verificar estado: scripts\ver_estado_detallado.bat
+echo   - Verificar estado: scripts\ver_estado.bat
 echo.
 echo ================================================================================
 

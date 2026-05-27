@@ -130,7 +130,6 @@ El proyecto incluye varios scripts de utilidad en la carpeta `scripts/`:
 | `ver_estado.bat` | Muestra el estado actual del sistema |
 | `verificar_instalacion.bat` | Verifica que todo está instalado correctamente |
 | `ver_festivos.bat` | Lista los festivos de Colombia |
-| `SOLUCION_HOY.bat` | Limpia marcajes duplicados del día actual |
 
 ---
 

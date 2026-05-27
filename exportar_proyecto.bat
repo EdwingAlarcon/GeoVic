@@ -45,7 +45,6 @@ if exist setup.sh               copy /Y setup.sh               "%EXPORT_DIR%\" >
 if exist README.md              copy /Y README.md              "%EXPORT_DIR%\" >nul
 if exist LEEME_PRIMERO.txt      copy /Y LEEME_PRIMERO.txt      "%EXPORT_DIR%\" >nul
 if exist exportar_exclude.txt   copy /Y exportar_exclude.txt   "%EXPORT_DIR%\" >nul
-if exist actualizar_servidor.bat copy /Y actualizar_servidor.bat "%EXPORT_DIR%\" >nul
 if exist LICENSE                copy /Y LICENSE                "%EXPORT_DIR%\" >nul
 echo    OK Archivos copiados
 echo.
@@ -105,7 +104,8 @@ echo.
 echo ESCENARIO B - Servidor existente (actualizar codigo):
 echo   1. Copiar ZIP al servidor
 echo   2. Extraer el ZIP en una carpeta temporal
-echo   3. Ejecutar actualizar_servidor.bat
+echo   3. Reemplazar archivos del proyecto conservando .env y config\employees.json
+echo   4. Ejecutar scripts\reiniciar_programador.bat
 echo.
 echo ================================================
 echo.
