@@ -373,6 +373,8 @@ class Config:
 
 ## 📚 Documentación
 
+### 🔧 Configuración
+- 📖 [Agregar Empleados](docs/AGREGAR_EMPLEADOS.md) - **Cómo agregar, modificar o desactivar empleados**
 ### 🚀 Instalación y Configuración
 - 📖 [Guía de Instalación](docs/GUIA_INSTALACION.md) - Guía completa paso a paso
 - 📖 [Instalación Completa](docs/INSTALACION_COMPLETA.md) - Instalación detallada con opciones

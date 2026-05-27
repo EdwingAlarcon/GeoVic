@@ -16,6 +16,7 @@ Esta carpeta contiene toda la documentación del proyecto GeoVictoria.
 
 ## 🔧 Configuración
 
+- **[AGREGAR_EMPLEADOS.md](AGREGAR_EMPLEADOS.md)** - Cómo agregar, modificar o desactivar empleados
 - **[CONFIGURAR_TAREA_WINDOWS.md](CONFIGURAR_TAREA_WINDOWS.md)** - Configurar tarea programada en Windows
 - **[INICIAR_SIN_REINICIAR.md](INICIAR_SIN_REINICIAR.md)** - Iniciar el sistema sin reiniciar
 
