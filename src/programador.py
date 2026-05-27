@@ -21,7 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.cache_estado import get_cache
-from src.empleados import cargar_empleados
+from src.empleados import cargar_empleados, obtener_horario_dia
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import run, verificar_estado
 
@@ -212,19 +212,14 @@ def ejecutar_marcaje_emp(
         logger.info("=" * 80)
         return None
 
-    # Determinar acción y hora programada
+    # Determinar acción y hora programada según el día actual
+    h_dia = obtener_horario_dia(horario, hoy.weekday())
     if "ENTRADA" in tipo_marcaje:
         accion_esperada = "Entrada"
-        if hoy.weekday() == 5:
-            hora_prog = time(horario["entrada_sabado_hora"], horario["entrada_sabado_minuto"])
-        else:
-            hora_prog = time(horario["entrada_semana_hora"], horario["entrada_semana_minuto"])
+        hora_prog = time(h_dia["entrada_hora"], h_dia["entrada_minuto"])
     else:
         accion_esperada = "Salida"
-        if hoy.weekday() == 5:
-            hora_prog = time(horario["salida_sabado_hora"], horario["salida_sabado_minuto"])
-        else:
-            hora_prog = time(horario["salida_semana_hora"], horario["salida_semana_minuto"])
+        hora_prog = time(h_dia["salida_hora"], h_dia["salida_minuto"])
 
     if validar_horario:
         hora_actual = ahora.time()
@@ -357,15 +352,15 @@ def verificar_pendientes_emp(empleado: Dict) -> None:
         return
 
     if dia_semana == 5:
-        hora_entrada = time(horario["entrada_sabado_hora"], horario["entrada_sabado_minuto"])
-        hora_salida = time(horario["salida_sabado_hora"], horario["salida_sabado_minuto"])
         tipo_entrada = "ENTRADA SÁBADO"
         tipo_salida = "SALIDA SÁBADO"
     else:
-        hora_entrada = time(horario["entrada_semana_hora"], horario["entrada_semana_minuto"])
-        hora_salida = time(horario["salida_semana_hora"], horario["salida_semana_minuto"])
         tipo_entrada = "ENTRADA SEMANA (L-V)"
         tipo_salida = "SALIDA SEMANA (L-V)"
+
+    h_dia = obtener_horario_dia(horario, dia_semana)
+    hora_entrada = time(h_dia["entrada_hora"], h_dia["entrada_minuto"])
+    hora_salida  = time(h_dia["salida_hora"],  h_dia["salida_minuto"])
 
     if ya_se_ejecuto_hoy(emp_id, tipo_entrada) and ya_se_ejecuto_hoy(emp_id, tipo_salida):
         logger.info(f"{tag} Ambos marcajes completados hoy")
@@ -402,9 +397,28 @@ def verificar_pendientes_emp(empleado: Dict) -> None:
             alertar_fallo(emp_nombre, tipo_salida)
 
 
+
 # ---------------------------------------------------------------------------
 # Configuración de jobs por empleado en el scheduler
 # ---------------------------------------------------------------------------
+
+# Mapeo de weekday Python (0-4) → nombre APScheduler
+_WEEKDAY_A_APSCHEDULER = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri"}
+
+
+def _agrupar_dias_semana_por_horario(horario: Dict):
+    """
+    Agrupa los días L-V según su combinación (entrada, salida).
+    Retorna lista de tuplas: ((eh, em, sh, sm), [lista de nombres APScheduler])
+    Esto permite crear un solo CronTrigger por grupo de días con el mismo horario.
+    """
+    grupos: Dict = {}
+    for wd, nombre_ap in _WEEKDAY_A_APSCHEDULER.items():
+        h = obtener_horario_dia(horario, wd)
+        clave = (h["entrada_hora"], h["entrada_minuto"], h["salida_hora"], h["salida_minuto"])
+        grupos.setdefault(clave, []).append(nombre_ap)
+    return list(grupos.items())
+
 
 def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict) -> None:
     emp_id = empleado["id"]
@@ -414,26 +428,32 @@ def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict) -
 
     logger.info(f"{tag} Configurando horarios:")
 
-    scheduler.add_job(
-        partial(entrada_semana_emp, empleado),
-        CronTrigger(day_of_week="mon-fri", hour=h["entrada_semana_hora"], minute=h["entrada_semana_minuto"], timezone="America/Bogota"),
-        id=f"entrada_semana_{emp_id}",
-        name=f"[{emp_nombre}] Entrada L-V {h['entrada_semana_hora']:02d}:{h['entrada_semana_minuto']:02d}",
-        max_instances=1,
-        coalesce=True,
-    )
-    logger.info(f"  {tag} ✓ Entrada L-V: {h['entrada_semana_hora']:02d}:{h['entrada_semana_minuto']:02d}")
+    # --- Días de semana (L-V), agrupados por combinación de horario ---
+    grupos = _agrupar_dias_semana_por_horario(h)
+    for idx, ((eh, em, sh, sm), dias_ap) in enumerate(grupos):
+        dias_str = ",".join(dias_ap)
+        # Sufijo numérico solo cuando hay más de un grupo (horario diferenciado por día)
+        sufijo = f"_g{idx}" if len(grupos) > 1 else ""
 
-    scheduler.add_job(
-        partial(salida_semana_emp, empleado),
-        CronTrigger(day_of_week="mon-fri", hour=h["salida_semana_hora"], minute=h["salida_semana_minuto"], timezone="America/Bogota"),
-        id=f"salida_semana_{emp_id}",
-        name=f"[{emp_nombre}] Salida L-V {h['salida_semana_hora']:02d}:{h['salida_semana_minuto']:02d}",
-        max_instances=1,
-        coalesce=True,
-    )
-    logger.info(f"  {tag} ✓ Salida L-V: {h['salida_semana_hora']:02d}:{h['salida_semana_minuto']:02d}")
+        scheduler.add_job(
+            partial(entrada_semana_emp, empleado),
+            CronTrigger(day_of_week=dias_str, hour=eh, minute=em, timezone="America/Bogota"),
+            id=f"entrada_semana_{emp_id}{sufijo}",
+            name=f"[{emp_nombre}] Entrada {dias_str} {eh:02d}:{em:02d}",
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.add_job(
+            partial(salida_semana_emp, empleado),
+            CronTrigger(day_of_week=dias_str, hour=sh, minute=sm, timezone="America/Bogota"),
+            id=f"salida_semana_{emp_id}{sufijo}",
+            name=f"[{emp_nombre}] Salida {dias_str} {sh:02d}:{sm:02d}",
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info(f"  {tag} ✓ Entrada {dias_str}: {eh:02d}:{em:02d} | Salida: {sh:02d}:{sm:02d}")
 
+    # --- Sábado (opcional) ---
     if h.get("trabaja_sabados", True):
         scheduler.add_job(
             partial(entrada_sabado_emp, empleado),

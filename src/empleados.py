@@ -21,7 +21,56 @@ _HORARIO_DEFAULT: Dict = {
     "salida_sabado_hora": 13,
     "salida_sabado_minuto": 0,
     "trabaja_sabados": True,
+    # "dias": {}  # overrides por día — clave opcional, ver employees.example.json
 }
+
+# Mapeo nombre de día en config → weekday de Python (0=lunes, 5=sábado)
+_NOMBRE_DIA_A_WEEKDAY: Dict[str, int] = {
+    "lun": 0, "mar": 1, "mie": 2, "jue": 3, "vie": 4, "sab": 5,
+}
+
+
+def obtener_horario_dia(horario: Dict, dia_semana: int) -> Dict:
+    """
+    Retorna el horario efectivo de entrada/salida para el día indicado.
+
+    Parámetros:
+        horario    — dict del empleado (con claves estándar + opcional "dias")
+        dia_semana — int de Python: 0=lunes … 5=sábado, 6=domingo
+
+    Retorna un dict con:
+        entrada_hora, entrada_minuto, salida_hora, salida_minuto
+
+    Si existe una clave en horario["dias"] para ese día, sus valores sobreescriben
+    el horario base de semana/sábado.  Cualquier subclave faltante se toma del base.
+    """
+    if dia_semana == 5:
+        base = {
+            "entrada_hora":   horario["entrada_sabado_hora"],
+            "entrada_minuto": horario["entrada_sabado_minuto"],
+            "salida_hora":    horario["salida_sabado_hora"],
+            "salida_minuto":  horario["salida_sabado_minuto"],
+        }
+    else:
+        base = {
+            "entrada_hora":   horario["entrada_semana_hora"],
+            "entrada_minuto": horario["entrada_semana_minuto"],
+            "salida_hora":    horario["salida_semana_hora"],
+            "salida_minuto":  horario["salida_semana_minuto"],
+        }
+
+    # Aplicar override específico del día si existe
+    dias_override = horario.get("dias", {})
+    for nombre_dia, idx in _NOMBRE_DIA_A_WEEKDAY.items():
+        if idx == dia_semana and nombre_dia in dias_override:
+            ov = dias_override[nombre_dia]
+            base["entrada_hora"]   = ov.get("entrada_hora",   base["entrada_hora"])
+            base["entrada_minuto"] = ov.get("entrada_minuto", base["entrada_minuto"])
+            base["salida_hora"]    = ov.get("salida_hora",    base["salida_hora"])
+            base["salida_minuto"]  = ov.get("salida_minuto",  base["salida_minuto"])
+            break
+
+    return base
 
 
 def _validar_empleado(emp: Dict) -> None:

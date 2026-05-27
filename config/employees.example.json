@@ -35,6 +35,29 @@
         "salida_sabado_minuto": 0,
         "trabaja_sabados": false
       }
+    },
+    {
+      "id": "emp3",
+      "nombre": "Empleado Tres",
+      "usuario": "usuario_geovictoria_3",
+      "password": "contraseña_3",
+      "activo": true,
+      "horario": {
+        "comentario": "Horario base L,Mi,J,V: 9-18. El martes tiene horario diferente: 8-17.",
+        "entrada_semana_hora": 9,
+        "entrada_semana_minuto": 0,
+        "salida_semana_hora": 18,
+        "salida_semana_minuto": 0,
+        "trabaja_sabados": false,
+        "dias": {
+          "mar": {
+            "entrada_hora": 8,
+            "entrada_minuto": 0,
+            "salida_hora": 17,
+            "salida_minuto": 0
+          }
+        }
+      }
     }
   ]
 }
