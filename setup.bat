@@ -1,6 +1,7 @@
 @echo off
+cd /d "%~dp0"
 chcp 65001 >nul
-setlocal enabledelayedexpansion
+setlocal
 color 0A
 
 echo.
@@ -54,8 +55,8 @@ python -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>nul
 if errorlevel 1 (
     color 0E
     echo    ⚠️  ADVERTENCIA: Se recomienda Python 3.8 o superior
-    echo    ℹ️  Tiene: %PYTHON_VERSION%
-    echo    ℹ️  Continuando de todos modos...
+    echo     Tiene: %PYTHON_VERSION%
+    echo     Continuando de todos modos...
     echo.
     timeout /t 3 /nobreak >nul
 )
@@ -84,12 +85,12 @@ echo.
 echo [2/8] 📦 Configurando entorno virtual Python...
 echo.
 
-if exist ".venv\" (
-    echo    ℹ️  El entorno virtual ya existe en: .venv\
-    echo    ℹ️  Se usará el entorno existente
+if exist ".venv\Scripts\activate.bat" (
+    echo     El entorno virtual ya existe en: .venv\
+    echo     Se usará el entorno existente
     echo.
 ) else (
-    echo    ⏳ Creando entorno virtual (esto toma ~10 segundos)...
+    echo    Creando entorno virtual ^(esto toma ~10 segundos^)...
     python -m venv .venv
     if errorlevel 1 (
         color 0C
@@ -117,7 +118,7 @@ echo.
 if not exist ".venv\Scripts\activate.bat" (
     color 0C
     echo    ❌ ERROR: No se encontró el script de activación
-    echo    ℹ️  Ruta esperada: .venv\Scripts\activate.bat
+    echo     Ruta esperada: .venv\Scripts\activate.bat
     echo.
     pause
     exit /b 1
@@ -131,7 +132,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo    ✅ Entorno virtual activado
-echo    ℹ️  Ruta: %VIRTUAL_ENV%
+echo     Ruta: %VIRTUAL_ENV%
 echo.
 
 :: ============================================================================
@@ -152,7 +153,7 @@ echo.
 :: PASO 5: INSTALAR DEPENDENCIAS DE PYTHON
 :: ============================================================================
 echo [5/8] 📚 Instalando dependencias de Python...
-echo    ℹ️  Leyendo requirements.txt
+echo     Leyendo requirements.txt
 echo.
 
 if not exist "requirements.txt" (
@@ -221,7 +222,7 @@ echo.
 :: PASO 6: INSTALAR NAVEGADORES DE PLAYWRIGHT
 :: ============================================================================
 echo [6/8] 🌐 Instalando navegador Chromium para Playwright...
-echo    ℹ️  Se descargarán aproximadamente 170 MB
+echo     Se descargarán aproximadamente 170 MB
 echo    ⏳ Esto puede tomar 2-5 minutos dependiendo de su conexión...
 echo.
 
@@ -261,7 +262,7 @@ echo [7/8] 🔐 Configurando archivo de variables de entorno...
 echo.
 
 if exist ".env" (
-    echo    ℹ️  El archivo .env ya existe
+    echo     El archivo .env ya existe
     echo.
     choice /C SN /M "¿Desea reemplazarlo con la plantilla"
     if errorlevel 2 (
@@ -347,8 +348,8 @@ echo.
 
 if %ERROR_COUNT% GTR 0 (
     color 0E
-    echo    ⚠️  Se encontraron %ERROR_COUNT% problema(s)
-    echo    ℹ️  El sistema puede no funcionar correctamente
+    echo    Se encontraron %ERROR_COUNT% problema^(s^)
+    echo     El sistema puede no funcionar correctamente
     echo.
 ) else (
     echo    ✅ Todas las verificaciones pasaron correctamente
