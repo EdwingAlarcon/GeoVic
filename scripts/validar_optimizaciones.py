@@ -55,9 +55,6 @@ except Exception as e:
 # 2. Verificar imports
 print("\n2️⃣ Verificando imports optimizados...")
 try:
-    from src.programador import verificar_estado_con_cache
-    print("   ✅ verificar_estado_con_cache importado")
-    
     from src.geovictoria import Config
     print(f"   ✅ Config.IFRAME_TIMEOUT = {Config.IFRAME_TIMEOUT}ms (optimizado a 30s)")
     print(f"   ✅ Config.MAX_RETRIES = {Config.MAX_RETRIES} (optimizado de 3)")
@@ -76,10 +73,9 @@ except Exception as e:
 print("\n3️⃣ Verificando funciones optimizadas...")
 try:
     from src.programador import (
-        verificar_estado_con_cache,
-        salida_semana,
-        salida_sabado,
-        verificar_marcajes_pendientes
+        salida_semana_emp,
+        salida_sabado_emp,
+        verificar_pendientes_emp
     )
     print("   ✅ Todas las funciones del programador disponibles")
     
