@@ -174,6 +174,22 @@ def determinar_tipo_marcaje(accion: str, dia_semana: int) -> str:
     return "ENTRADA SEMANA (L-V)" if accion == "Entrada" else "SALIDA SEMANA (L-V)"
 
 
+def _portal_refleja_marcaje_completado(tipo_marcaje: str, boton_disponible: Optional[str]) -> bool:
+    """Determina si el estado actual del portal implica que el marcaje ya fue realizado."""
+    if not boton_disponible:
+        return False
+
+    # Si el portal muestra "Salida", significa que ya existe una entrada activa.
+    if "ENTRADA" in tipo_marcaje and boton_disponible == "Salida":
+        return True
+
+    # Si el portal muestra "Entrada", significa que ya se cerró la jornada (salida hecha).
+    if "SALIDA" in tipo_marcaje and boton_disponible == "Entrada":
+        return True
+
+    return False
+
+
 def ejecutar_marcaje_emp(
     empleado: Dict,
     tipo_marcaje: str,
@@ -244,6 +260,18 @@ def ejecutar_marcaje_emp(
             guardar_registro(emp_id, tipo_real, variacion_minutos)
             logger.info(f"{tag} ✅ Marcaje completado: {accion} — guardado como '{tipo_real}'")
         else:
+            # Revalidar estado del portal para evitar falsos negativos por ejecuciones
+            # concurrentes o marcajes manuales ya realizados.
+            get_cache().invalidar(f"estado_{emp_id}")
+            boton = verificar_estado_emp(emp_id, empleado)
+            if _portal_refleja_marcaje_completado(tipo_marcaje, boton):
+                guardar_registro(emp_id, tipo_marcaje, variacion_minutos)
+                logger.info(
+                    f"{tag} ℹ️ Marcaje ya reflejado en portal (botón: {boton}) — "
+                    f"sincronizado como '{tipo_marcaje}'"
+                )
+                return accion_esperada
+
             logger.warning(f"{tag} ⚠️ Marcaje no ejecutado")
             alertar_fallo(emp_nombre, tipo_marcaje)
 
@@ -475,13 +503,14 @@ def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict) -
 
     scheduler.add_job(
         partial(verificar_pendientes_emp, empleado),
-        CronTrigger(minute=0, timezone="America/Bogota"),
+        # Evita competir con marcajes exactos en hora en punto (07:00, 17:00, etc.).
+        CronTrigger(minute=5, timezone="America/Bogota"),
         id=f"verificacion_{emp_id}",
-        name=f"[{emp_nombre}] Verificación cada hora",
+        name=f"[{emp_nombre}] Verificación cada hora (:05)",
         max_instances=1,
         coalesce=True,
     )
-    logger.info(f"  {tag} ✓ Verificación periódica: cada hora")
+    logger.info(f"  {tag} ✓ Verificación periódica: cada hora al minuto 05")
 
 
 # ---------------------------------------------------------------------------
