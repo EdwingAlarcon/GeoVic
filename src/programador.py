@@ -85,7 +85,7 @@ _limpiar_logs_viejos(dias=14)
 
 class HorarioConfig:
     COOLDOWN_ENTRE_MARCAJES = 300  # segundos
-    STAGGER_SEGUNDOS = 30         # separación entre empleados con el mismo horario
+    STAGGER_SEGUNDOS = 10         # separación entre empleados con el mismo horario
 
 
 def _aplicar_offset(hora: int, minuto: int, offset_segundos: int):
