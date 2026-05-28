@@ -57,6 +57,28 @@ logger.info(f"📁 Log: {log_file}")
 logger.info("=" * 80)
 
 
+def _limpiar_logs_viejos(dias: int = 14) -> None:
+    """Borra archivos .log del directorio de logs con más de `dias` días de antigüedad.
+    Excluye alertas.log (archivo de monitoreo externo, crece de forma acumulativa).
+    """
+    umbral = datetime.now().timestamp() - dias * 86400
+    borrados = 0
+    for archivo in log_dir.glob("*.log"):
+        if archivo.name == "alertas.log":
+            continue
+        if archivo.stat().st_mtime < umbral:
+            try:
+                archivo.unlink()
+                borrados += 1
+            except OSError as e:
+                logger.warning(f"No se pudo borrar {archivo.name}: {e}")
+    if borrados:
+        logger.info(f"🧹 Limpieza de logs: {borrados} archivo(s) eliminado(s) (>{dias} días)")
+
+
+_limpiar_logs_viejos(dias=14)
+
+
 # ---------------------------------------------------------------------------
 # Configuración global de horarios (valores por defecto)
 # ---------------------------------------------------------------------------
