@@ -85,6 +85,13 @@ _limpiar_logs_viejos(dias=14)
 
 class HorarioConfig:
     COOLDOWN_ENTRE_MARCAJES = 300  # segundos
+    STAGGER_SEGUNDOS = 30         # separación entre empleados con el mismo horario
+
+
+def _aplicar_offset(hora: int, minuto: int, offset_segundos: int):
+    """Convierte hora:minuto + offset en (hora, minuto, segundo) sin desbordamiento."""
+    total = hora * 3600 + minuto * 60 + offset_segundos
+    return total // 3600, (total % 3600) // 60, total % 60
 
 
 # ---------------------------------------------------------------------------
@@ -470,69 +477,77 @@ def _agrupar_dias_semana_por_horario(horario: Dict):
     return list(grupos.items())
 
 
-def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict) -> None:
+def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict, emp_index: int = 0) -> None:
     emp_id = empleado["id"]
     emp_nombre = empleado["nombre"]
     h = empleado["horario"]
     tag = f"[{emp_nombre}]"
+    offset_s = emp_index * HorarioConfig.STAGGER_SEGUNDOS
 
-    logger.info(f"{tag} Configurando horarios:")
+    logger.info(f"{tag} Configurando horarios (offset +{offset_s}s):")
 
     # --- Días de semana (L-V), agrupados por combinación de horario ---
     grupos = _agrupar_dias_semana_por_horario(h)
-    for idx, ((eh, em, sh, sm), dias_ap) in enumerate(grupos):
+    for gidx, ((eh, em, sh, sm), dias_ap) in enumerate(grupos):
         dias_str = ",".join(dias_ap)
         # Sufijo numérico solo cuando hay más de un grupo (horario diferenciado por día)
-        sufijo = f"_g{idx}" if len(grupos) > 1 else ""
+        sufijo = f"_g{gidx}" if len(grupos) > 1 else ""
+
+        feh, fem, fes = _aplicar_offset(eh, em, offset_s)
+        fsh, fsm, fss = _aplicar_offset(sh, sm, offset_s)
 
         scheduler.add_job(
             partial(entrada_semana_emp, empleado),
-            CronTrigger(day_of_week=dias_str, hour=eh, minute=em, timezone="America/Bogota"),
+            CronTrigger(day_of_week=dias_str, hour=feh, minute=fem, second=fes, timezone="America/Bogota"),
             id=f"entrada_semana_{emp_id}{sufijo}",
-            name=f"[{emp_nombre}] Entrada {dias_str} {eh:02d}:{em:02d}",
+            name=f"[{emp_nombre}] Entrada {dias_str} {feh:02d}:{fem:02d}:{fes:02d}",
             max_instances=1,
             coalesce=True,
         )
         scheduler.add_job(
             partial(salida_semana_emp, empleado),
-            CronTrigger(day_of_week=dias_str, hour=sh, minute=sm, timezone="America/Bogota"),
+            CronTrigger(day_of_week=dias_str, hour=fsh, minute=fsm, second=fss, timezone="America/Bogota"),
             id=f"salida_semana_{emp_id}{sufijo}",
-            name=f"[{emp_nombre}] Salida {dias_str} {sh:02d}:{sm:02d}",
+            name=f"[{emp_nombre}] Salida {dias_str} {fsh:02d}:{fsm:02d}:{fss:02d}",
             max_instances=1,
             coalesce=True,
         )
-        logger.info(f"  {tag} ✓ Entrada {dias_str}: {eh:02d}:{em:02d} | Salida: {sh:02d}:{sm:02d}")
+        logger.info(f"  {tag} ✓ Entrada {dias_str}: {feh:02d}:{fem:02d}:{fes:02d} | Salida: {fsh:02d}:{fsm:02d}:{fss:02d}")
 
     # --- Sábado (opcional) ---
     if h.get("trabaja_sabados", True):
+        feh_s, fem_s, fes_s = _aplicar_offset(h["entrada_sabado_hora"], h["entrada_sabado_minuto"], offset_s)
+        fsh_s, fsm_s, fss_s = _aplicar_offset(h["salida_sabado_hora"], h["salida_sabado_minuto"], offset_s)
+
         scheduler.add_job(
             partial(entrada_sabado_emp, empleado),
-            CronTrigger(day_of_week="sat", hour=h["entrada_sabado_hora"], minute=h["entrada_sabado_minuto"], timezone="America/Bogota"),
+            CronTrigger(day_of_week="sat", hour=feh_s, minute=fem_s, second=fes_s, timezone="America/Bogota"),
             id=f"entrada_sabado_{emp_id}",
-            name=f"[{emp_nombre}] Entrada Sáb {h['entrada_sabado_hora']:02d}:{h['entrada_sabado_minuto']:02d}",
+            name=f"[{emp_nombre}] Entrada Sáb {feh_s:02d}:{fem_s:02d}:{fes_s:02d}",
             max_instances=1,
             coalesce=True,
         )
         scheduler.add_job(
             partial(salida_sabado_emp, empleado),
-            CronTrigger(day_of_week="sat", hour=h["salida_sabado_hora"], minute=h["salida_sabado_minuto"], timezone="America/Bogota"),
+            CronTrigger(day_of_week="sat", hour=fsh_s, minute=fsm_s, second=fss_s, timezone="America/Bogota"),
             id=f"salida_sabado_{emp_id}",
-            name=f"[{emp_nombre}] Salida Sáb {h['salida_sabado_hora']:02d}:{h['salida_sabado_minuto']:02d}",
+            name=f"[{emp_nombre}] Salida Sáb {fsh_s:02d}:{fsm_s:02d}:{fss_s:02d}",
             max_instances=1,
             coalesce=True,
         )
         logger.info(f"  {tag} ✓ Entrada/Salida Sábado configurados")
 
+    # Verificación periódica escalonada dentro del minuto :05 (10s entre empleados)
+    verificacion_segundo = (emp_index * 10) % 60
     scheduler.add_job(
         partial(verificar_pendientes_emp, empleado),
-        # Evita competir con marcajes exactos en hora en punto (07:00, 17:00, etc.).
-        CronTrigger(minute=5, timezone="America/Bogota"),
+        CronTrigger(minute=5, second=verificacion_segundo, timezone="America/Bogota"),
         id=f"verificacion_{emp_id}",
-        name=f"[{emp_nombre}] Verificación cada hora (:05)",
+        name=f"[{emp_nombre}] Verificación cada hora (:05:{verificacion_segundo:02d})",
         max_instances=1,
         coalesce=True,
     )
-    logger.info(f"  {tag} ✓ Verificación periódica: cada hora al minuto 05")
+    logger.info(f"  {tag} ✓ Verificación periódica: cada hora al :05:{verificacion_segundo:02d}")
 
 
 # ---------------------------------------------------------------------------
@@ -633,9 +648,9 @@ def main() -> None:
     scheduler = BlockingScheduler(timezone="America/Bogota")
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
-    for emp in empleados:
+    for idx, emp in enumerate(empleados):
         try:
-            configurar_trabajos_empleado(scheduler, emp)
+            configurar_trabajos_empleado(scheduler, emp, emp_index=idx)
         except Exception as e:
             logger.error(f"❌ Error configurando trabajos de {emp.get('nombre', emp.get('id'))}: {e}", exc_info=True)
 
