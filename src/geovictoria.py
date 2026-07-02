@@ -29,8 +29,11 @@ try:
         _SEL = json.load(_f)
 except (FileNotFoundError, json.JSONDecodeError):
     _SEL = {
-        "login": {"username": "#user", "password": "input[type='password']"},
-        "attendance": {"btn_entrada": "text=Marcar Entrada", "btn_salida": "text=Marcar Salida"},
+        "login": {"username": "#user", "password": "input[type='password']", "submit": "#btnLogin"},
+        "attendance": {
+            "btn_entrada": "button[data-help-title='Marcar Entrada']:visible",
+            "btn_salida": "button[data-help-title='Marcar Salida']:visible",
+        },
     }
 
 # --- Logging con rotación (5 MB x 5 archivos) ---
@@ -124,7 +127,7 @@ async def login(page, usuario: str, password: str, tag: str = "") -> bool:
 
         await page.fill(_SEL["login"]["username"], usuario)
         await page.fill(_SEL["login"]["password"], password)
-        await page.keyboard.press("Enter")
+        await page.click(_SEL["login"]["submit"])
 
         await page.wait_for_url(lambda url: "login" not in url, timeout=Config.LOGIN_TIMEOUT)
 

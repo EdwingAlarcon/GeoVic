@@ -1,10 +1,11 @@
 {
   "login": {
     "username": "#user",
-    "password": "input[type='password']"
+    "password": "input[type='password']",
+    "submit": "#btnLogin"
   },
   "attendance": {
-    "btn_entrada": "text=Marcar Entrada",
-    "btn_salida": "text=Marcar Salida"
+    "btn_entrada": "button[data-help-title='Marcar Entrada']:visible",
+    "btn_salida": "button[data-help-title='Marcar Salida']:visible"
   }
 }
