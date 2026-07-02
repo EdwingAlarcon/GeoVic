@@ -39,6 +39,7 @@ logs/
 
 # Playwright
 .playwright/
+.playwright-mcp/
 
 # IDEs
 .vscode/
