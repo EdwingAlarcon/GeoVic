@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.festivos_colombia import (
+    cargar_festivos_adicionales,
     calcular_pascua,
     es_dia_laborable,
     es_festivo,
@@ -137,10 +138,11 @@ class TestLeyEmiliani:
 # ---------------------------------------------------------------------------
 
 class TestConteoFestivos:
-    def test_colombia_tiene_18_festivos(self):
+    def test_colombia_tiene_18_festivos_legales_mas_adicionales(self):
         for año in (2024, 2025, 2026):
             festivos = obtener_festivos_colombia(año)
-            assert len(festivos) == 18, f"Año {año}: esperados 18, got {len(festivos)}"
+            esperados = 18 + len(cargar_festivos_adicionales(año))
+            assert len(festivos) == esperados, f"Año {año}: esperados {esperados}, got {len(festivos)}"
 
     def test_festivos_ordenados(self):
         festivos = obtener_festivos_colombia(2026)

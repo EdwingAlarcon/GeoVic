@@ -2,8 +2,39 @@
 Módulo para gestionar festivos en Colombia
 Incluye festivos fijos y móviles según la ley colombiana
 """
+import json
 from datetime import datetime, date
+from pathlib import Path
 from typing import List
+
+RUTA_FESTIVOS_ADICIONALES = Path(__file__).parent.parent / "config" / "festivos_adicionales.json"
+
+def cargar_festivos_adicionales(año: int) -> List[date]:
+    """
+    Carga festivos adicionales (decretados fuera del calendario legal fijo)
+    desde config/festivos_adicionales.json, filtrados por año.
+    Permite agregar festivos nuevos (p. ej. decretados por el Gobierno)
+    sin modificar el algoritmo del calendario base.
+    """
+    if not RUTA_FESTIVOS_ADICIONALES.exists():
+        return []
+
+    try:
+        with open(RUTA_FESTIVOS_ADICIONALES, "r", encoding="utf-8") as f:
+            datos = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    festivos = []
+    for entrada in datos:
+        try:
+            fecha = datetime.strptime(entrada["fecha"], "%Y-%m-%d").date()
+        except (KeyError, ValueError):
+            continue
+        if fecha.year == año:
+            festivos.append(fecha)
+
+    return festivos
 
 def calcular_pascua(año: int) -> date:
     """Calcula la fecha de Pascua usando el algoritmo de Meeus/Jones/Butcher"""
@@ -82,7 +113,13 @@ def obtener_festivos_colombia(año: int) -> List[date]:
     # Sagrado Corazón (68 días después de Pascua, se mueve al siguiente lunes)
     sagrado_corazon = pascua + timedelta(days=68)
     festivos.append(siguiente_lunes(sagrado_corazon))
-    
+
+    # Festivos adicionales decretados fuera del calendario legal fijo
+    # (ver config/festivos_adicionales.json)
+    for adicional in cargar_festivos_adicionales(año):
+        if adicional not in festivos:
+            festivos.append(adicional)
+
     return sorted(festivos)
 
 def es_festivo(fecha: date) -> bool:
