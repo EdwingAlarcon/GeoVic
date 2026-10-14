@@ -18,7 +18,8 @@ class Config:
     BUTTON_TIMEOUT = 5000
     MAX_RETRIES = 2
     RETRY_DELAY = 1
-    HEADLESS = False
+    # Visible por defecto; en servidor sin sesión interactiva se fuerza con GEOVICTORIA_HEADLESS=1
+    HEADLESS = os.getenv("GEOVICTORIA_HEADLESS", "").strip().lower() in ("1", "true", "yes")
     LOGIN_TIMEOUT = 10000
 
 

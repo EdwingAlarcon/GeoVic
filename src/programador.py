@@ -554,14 +554,29 @@ def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict, e
 # Lock file (previene múltiples instancias del programador)
 # ---------------------------------------------------------------------------
 
+def _es_programador_vivo(pid: int) -> bool:
+    """True solo si el PID es realmente otro programador.py en ejecución.
+
+    Tras un reinicio del servidor Windows puede reasignar el PID del lock viejo a
+    un proceso cualquiera; pid_exists() solo no basta para distinguirlo.
+    """
+    import psutil
+    if pid == os.getpid():
+        return False
+    try:
+        cmdline = psutil.Process(pid).cmdline()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+    return any("programador.py" in parte.lower() for parte in cmdline)
+
+
 def crear_lock_file() -> None:
     if lock_file.exists():
         try:
             with open(lock_file, "r") as f:
                 pid = int(f.read().strip())
 
-            import psutil
-            if psutil.pid_exists(pid):
+            if _es_programador_vivo(pid):
                 logger.error(f"❌ Programador ya en ejecución (PID {pid}) — detenga esa instancia primero")
                 sys.exit(1)
             else:
