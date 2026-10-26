@@ -131,3 +131,13 @@ def test_maximo_desde_entorno(monkeypatch):
 
     monkeypatch.setenv("GEOVICTORIA_MAX_NAVEGADORES", "abc")
     assert cc.maximo_navegadores_desde_entorno() == 3  # inválido: usa el defecto
+
+
+def test_desactivar_seleccion_consola_nunca_rompe_sin_consola():
+    # En pytest la entrada estándar no es una consola: debe devolver False sin lanzar.
+    assert cc.desactivar_seleccion_consola() in (False, True)
+
+
+def test_desactivar_seleccion_consola_no_hace_nada_fuera_de_windows(monkeypatch):
+    monkeypatch.setattr(cc.sys, "platform", "linux")
+    assert cc.desactivar_seleccion_consola() is False

@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src import bitacora
+from src.control_concurrencia import desactivar_seleccion_consola
 from src import diagnostico_login as dl
 from src import estado_monitor
 from src.festivos_colombia import es_festivo
@@ -283,6 +284,7 @@ def main() -> int:
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    desactivar_seleccion_consola()  # un clic en la ventana no debe congelar el monitor
 
     if args.host not in _LOCALES and not args.token:
         print("❌ Para escuchar en la red hay que indicar --token (la página muestra nombres y horarios del personal).")

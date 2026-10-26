@@ -24,6 +24,8 @@ NOMBRE_MUTEX = "Global\\GeoVictoriaProgramadorUnico"
 
 _ERROR_ACCESS_DENIED = 5
 _ERROR_ALREADY_EXISTS = 183
+_ENABLE_QUICK_EDIT_MODE = 0x0040
+_ENABLE_EXTENDED_FLAGS = 0x0080
 
 _recurso_instancia = None  # handle/fd que mantiene la exclusión mientras viva el proceso
 
@@ -80,6 +82,35 @@ def _adquirir_flock(guard_path: Path):
         archivo.close()
         raise InstanciaYaEnEjecucion(str(guard_path))
     return archivo
+
+
+def desactivar_seleccion_consola() -> bool:
+    """Desactiva la "selección rápida" de la consola de Windows; True si quedó desactivada.
+
+    Con ella activa, un clic dentro de la ventana (título "Seleccionar ...") congela el proceso en
+    cuanto intenta escribir en la consola, y un programador congelado no marca. Sin consola
+    (proceso redirigido, otro sistema operativo) no hace nada y devuelve False. Nunca lanza.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetStdHandle.restype = ctypes.c_void_p
+        kernel32.GetStdHandle.argtypes = [ctypes.c_ulong]
+        kernel32.GetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.SetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+
+        entrada = kernel32.GetStdHandle(ctypes.c_ulong(-10).value)  # STD_INPUT_HANDLE
+        modo = ctypes.c_ulong()
+        if not entrada or not kernel32.GetConsoleMode(entrada, ctypes.byref(modo)):
+            return False
+        nuevo = (modo.value & ~_ENABLE_QUICK_EDIT_MODE) | _ENABLE_EXTENDED_FLAGS
+        return bool(kernel32.SetConsoleMode(entrada, nuevo))
+    except Exception:
+        logger.debug("No se pudo desactivar la selección rápida de la consola", exc_info=True)
+        return False
 
 
 def maximo_navegadores_desde_entorno(defecto: int = 3) -> int:

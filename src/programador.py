@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src import bitacora
 from src.cache_estado import get_cache
-from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica
+from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica, desactivar_seleccion_consola
 from src.empleados import cargar_empleados, obtener_horario_dia
 from src.estado_monitor import confirmacion_de
 from src.festivos_colombia import es_festivo, listar_festivos_año
@@ -739,6 +739,7 @@ def main() -> None:
     except Exception:
         pass  # Si falla, seguir con stderr original
 
+    desactivar_seleccion_consola()  # un clic en la ventana no debe congelar el scheduler
     crear_lock_file()
     atexit.register(eliminar_lock_file)
     _iniciar_latido()
