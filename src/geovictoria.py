@@ -30,7 +30,9 @@ class Config:
     BUTTON_TIMEOUT = 5000
     MAX_RETRIES = 2
     RETRY_DELAY = 1
-    # Visible por defecto; en servidor sin sesión interactiva se fuerza con GEOVICTORIA_HEADLESS=1
+    # Visible por defecto. GEOVICTORIA_HEADLESS=1 oculta el navegador, PERO NO ESTÁ VALIDADO contra el portal
+    # real: el 26-oct-2026 los clics de las 3 primeras salidas reales hechas en headless no se guardaron
+    # (el portal seguía ofreciendo "Salida"). No usarlo en producción sin una prueba controlada antes.
     HEADLESS = os.getenv("GEOVICTORIA_HEADLESS", "").strip().lower() in ("1", "true", "yes")
     # Con varios navegadores a la vez el login puede tardar; 10 s daba timeouts falsos en horas pico
     LOGIN_TIMEOUT = 25000

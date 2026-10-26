@@ -1,15 +1,16 @@
 @echo off
 chcp 65001 >nul
-REM Inicia programador y monitor SIN ventanas (consolas ocultas) y con el navegador en modo headless.
+REM Inicia programador y monitor SIN consolas (ocultas). El navegador NO se oculta: al marcar, Chromium
+REM aparece unos segundos en la pantalla del servidor, igual que cuando se usan las ventanas.
 REM Se ve todo desde el monitor: http://127.0.0.1:8765 (incluye el panel "Log en vivo").
 REM Detiene antes lo que haya (programador y monitor), asi que sirve tambien para reiniciar.
 REM
+REM IMPORTANTE: NO se activa el modo headless (GEOVICTORIA_HEADLESS). El 26-oct-2026 las 3 primeras
+REM salidas reales marcadas en headless NO quedaron registradas en el portal (el clic no se guardo), asi que
+REM headless no esta validado contra el portal real. Aqui se limpia esa variable a proposito.
+REM
 REM Para volver al modo con ventanas: reiniciar_programador.bat  (y monitor.bat si lo quieres)
 REM Para detenerlo todo: detener_programador.bat y detener_monitor.bat
-REM
-REM Antes de fiarte de este modo en produccion, confirma un marcaje REAL en headless (ver el monitor:
-REM debe quedar "Confirmada"). Si el portal no acepta el navegador sin ventana, el monitor lo marca
-REM "NO confirmada" y vuelves al modo con ventanas.
 
 cd /d "%~dp0.."
 
@@ -29,8 +30,8 @@ if errorlevel 1 (
 )
 call "%~dp0detener_monitor.bat" nopause
 
-echo [2/3] Iniciando programador y monitor ocultos (headless)...
-set "GEOVICTORIA_HEADLESS=1"
+echo [2/3] Iniciando programador y monitor sin consolas (el navegador seguira visible al marcar)...
+set "GEOVICTORIA_HEADLESS="
 powershell -NoProfile -Command "Start-Process -FilePath '%PYTHON%' -ArgumentList 'src\programador.py' -WorkingDirectory '%CD%' -WindowStyle Hidden; Start-Process -FilePath '%PYTHON%' -ArgumentList 'scripts\monitor.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
 ping -n 10 127.0.0.1 >nul
 
@@ -40,7 +41,8 @@ set "RC=%errorlevel%"
 
 echo.
 if "%RC%"=="0" (
-    echo Listo. No hay ventanas: abre http://127.0.0.1:8765 para ver el estado.
+    echo Listo. No hay consolas: abre http://127.0.0.1:8765 para ver el estado.
+    echo El navegador aparecera unos segundos en esta pantalla cuando se marque ^(es lo normal^).
 ) else (
     echo El programador no arranco: usa reiniciar_programador.bat para verlo con ventana y leer el error.
 )

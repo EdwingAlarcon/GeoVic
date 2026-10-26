@@ -1,8 +1,9 @@
 @echo off
 chcp 65001 >nul
-REM Interruptor del MODO OCULTO (programador y monitor sin ventanas, navegador headless).
+REM Interruptor del MODO OCULTO: programador y monitor SIN consolas. El navegador sigue visible al marcar
+REM (NO es headless: headless fallo con el portal real el 26-oct-2026 y no esta validado).
 REM Cada ejecucion lo cambia: si esta apagado lo enciende y viceversa. Luego reinicia lo que esta corriendo.
-REM Con el modo encendido, actualizar_servidor.bat y el arranque con Windows tambien arrancan sin ventanas.
+REM Con el modo encendido, actualizar_servidor.bat y el arranque con Windows tambien arrancan sin consolas.
 REM Se ve todo en http://127.0.0.1:8765 (botones para reiniciar/detener incluidos).
 
 cd /d "%~dp0.."

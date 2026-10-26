@@ -29,7 +29,7 @@ from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_
 from src.empleados import cargar_empleados, obtener_horario_dia
 from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
 from src.festivos_colombia import es_festivo, listar_festivos_año
-from src.geovictoria import run, verificar_estado
+from src.geovictoria import Config, run, verificar_estado
 from src.reintentos import demora_reintento_desde_entorno, puede_reintentar, reintentos_desde_entorno
 
 # ---------------------------------------------------------------------------
@@ -904,6 +904,11 @@ def main() -> None:
     except ValueError as e:
         logger.error(f"❌ Error cargando empleados: {e}")
         sys.exit(1)
+
+    if Config.HEADLESS:
+        logger.warning("⚠️ GEOVICTORIA_HEADLESS está activo: el 26-oct-2026 los clics hechos así NO quedaron "
+                       "registrados en el portal real. Verifica cada marcaje en el monitor o desactívalo.")
+        bitacora.registrar("aviso", mensaje="headless activo: no validado contra el portal real")
 
     logger.info(f"👥 Empleados activos: {len(empleados)}")
     _NOMBRES.update({e["id"]: e["nombre"] for e in empleados})

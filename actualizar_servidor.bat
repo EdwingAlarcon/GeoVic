@@ -186,7 +186,7 @@ echo   ACTUALIZACION COMPLETADA
 echo ================================================
 echo.
 if exist "%TARGET%\config\modo_oculto.flag" (
-    echo Modo oculto: no hay ventanas. Todo se ve y se controla en http://127.0.0.1:8765
+    echo Modo oculto: no hay consolas ^(el navegador aparece unos segundos al marcar^). Todo se ve y se controla en http://127.0.0.1:8765
 ) else (
     echo Deja abiertas las ventanas "Programador GeoVictoria" y "Monitor GeoVictoria" ^(puedes minimizarlas, no cerrarlas^).
     echo Monitor en vivo ^(con botones para reiniciar/detener^): http://127.0.0.1:8765

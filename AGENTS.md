@@ -37,14 +37,14 @@ pytest tests/test_empleados.py
 **Windows convenience scripts** (in `scripts/`):
 - `iniciar_programador.bat` — start the scheduler (window "Programador GeoVictoria")
 - `reiniciar_programador.bat` / `detener_programador.bat` — restart / stop it; they kill only `programador.py` processes, never other Python
-- `iniciar_oculto.bat` / `detener_monitor.bat` — run scheduler + monitor with no windows (hidden consoles, `GEOVICTORIA_HEADLESS=1`); stops what is running first, so it also restarts. Headless real markings are not yet confirmed on the live portal: verify with the monitor ("Confirmada") before relying on it
+- `iniciar_oculto.bat` / `detener_monitor.bat` — run scheduler + monitor with hidden consoles; the browser stays visible while marking (it clears `GEOVICTORIA_HEADLESS` on purpose: see Key Constraints); stops what is running first, so it also restarts
 - `ejecutar_manual.bat` — one-off marking
 - `ver_estado.bat` — show current scheduler state (calls `scripts/verificar_estado.py`)
 - `diagnostico_sistema.bat` — scheduler instances, lock, registry, recent logs and today's alerts per user
 - `probar_login.bat [id|name]` — test ONE employee's login without marking (works for disabled employees too) and explain the failure (bad credentials, locked account, password change, 2FA…); logic lives in `src/diagnostico_login.py`
 - `ver_log_en_vivo.bat` — follow the scheduler log live (the monitor page also has a "Log en vivo" panel with usernames and passwords censored, so this window is optional)
 - `monitor.bat` — live web monitor (`http://127.0.0.1:8765`): per-employee status, scheduler heartbeat, instance count, alerts, "Log en vivo" panel, Reiniciar/Detener/Iniciar buttons for the scheduler, and "Marcar pendientes" (lists who is VENCIDA/NO confirmada; launches `scripts/marcar_pendientes.py emp:accion…`, which only clicks if the portal offers that button, skips anyone another process is handling, and confirms with a second login). Logic in `src/estado_monitor.py` (pure, tested); server in `scripts/monitor.py`; process control in `src/control_programador.py`. Never serves credentials. The only acting route is `POST /api/accion`: loopback clients only, custom header `X-GeoVic-Accion`, token if set, and it refuses restart/stop near a marking (`bloqueo_por_marcaje`) unless forced
-- `modo_oculto.bat` / `inicio_con_windows.bat` — toggles: hidden mode (`config/modo_oculto.flag`, honored by `actualizar_servidor.bat` and `iniciar_al_inicio.bat`) and a Startup-folder shortcut that launches everything at logon (no Scheduled Task, no admin; only fires when that user logs on)
+- `modo_oculto.bat` / `inicio_con_windows.bat` — toggles: hidden consoles mode, not headless (`config/modo_oculto.flag`, honored by `actualizar_servidor.bat` and `iniciar_al_inicio.bat`) and a Startup-folder shortcut that launches everything at logon (no Scheduled Task, no admin; only fires when that user logs on)
 - `actualizar_servidor.bat` (project root) — update an installed server from the extracted zip
 
 ## Architecture
@@ -98,5 +98,5 @@ pytest tests/test_empleados.py
 
 - `apscheduler` is pinned to `<4.0` due to a breaking API change in v4.
 - The scheduler is **not async**; it calls `asyncio.run(...)` inside sync job functions (APScheduler's `BlockingScheduler` is synchronous). Do not mix with async schedulers.
-- `HEADLESS = False` is the default — the browser window is visible. Change to `True` in `Config` for unattended/server environments.
+- `HEADLESS = False` is the default — the browser window is visible. **Do not enable headless in production** (`GEOVICTORIA_HEADLESS`): on 2026-10-26 the clicks of the first 3 real salidas made in headless were not saved by the live portal (it kept offering "Salida"), so it is not validated. The scheduler logs a warning and an `aviso` event when it is on. Hiding the consoles (`modo_oculto.bat`) is fine; hiding the browser is not. Any future headless test must be controlled (one employee, watched, with the monitor) and never done on everyone's real markings.
 - All times are in `America/Bogota` (Colombia, UTC-5, no DST).
