@@ -11,6 +11,7 @@ Estados de un marcaje (entrada o salida) de un empleado:
   no_confirmada  el segundo login vio que el portal SIGUE ofreciendo el botón  -> CRÍTICO
   desactivado / no_aplica (domingo, festivo, no trabaja ese día)
 """
+import re
 from datetime import datetime, time
 from typing import Dict, List, Optional
 
@@ -267,3 +268,26 @@ def calcular_estado(
         "actividad": [describir(e) for e in reversed(eventos[-25:])],
         "alertas": {"total": len(alertas_hoy), "por_usuario": por_usuario},
     }
+
+
+_MIN_SECRETO = 4  # un secreto más corto mutilaría líneas del log sin proteger nada útil
+
+
+def censurar_linea(linea: str, secretos: List[str]) -> str:
+    """Oculta usuarios y contraseñas antes de mostrar una línea de log en la página.
+
+    geovictoria.py escribe "Usuario: <usuario>" en su log, así que el monitor nunca debe servir una
+    línea sin pasar por aquí: se tapa el valor tras "Usuario:" y cualquier usuario o contraseña
+    configurados que aparezca literalmente.
+    """
+    linea = re.sub(r"(Usuario:\s*)\S+", r"\1***", linea, flags=re.IGNORECASE)
+    for secreto in secretos:
+        if secreto and len(secreto) >= _MIN_SECRETO:
+            linea = linea.replace(secreto, "***")
+    return linea
+
+
+def ultimas_lineas_censuradas(texto: str, cuantas: int, secretos: List[str]) -> List[str]:
+    """Las últimas `cuantas` líneas no vacías de `texto`, ya censuradas."""
+    lineas = [l.rstrip("\r") for l in texto.split("\n") if l.strip()]
+    return [censurar_linea(l, secretos) for l in lineas[-max(cuantas, 0):]] if cuantas else []

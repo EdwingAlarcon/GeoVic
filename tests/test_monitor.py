@@ -133,3 +133,51 @@ def test_los_registros_y_alertas_de_hoy_se_leen(monitor_mod, empleados_json, tmp
     ana = datos["empleados"][0]
     if ana["dia"] == "semana":  # la clave del registro es la de L-V; en sábado/domingo/festivo no aplica
         assert ana["entrada"]["estado"] == "confirmada" and ana["entrada"]["hora"] == "07:00:30"
+
+
+def _escribir_log(tmp_path, nombre, lineas):
+    (tmp_path / f"{nombre}_{datetime.now().strftime('%Y%m%d')}.log").write_text("\n".join(lineas) + "\n", encoding="utf-8")
+
+
+def test_log_oculta_usuarios_y_contrasenas(monitor_mod, empleados_json, tmp_path):
+    _escribir_log(tmp_path, "geovictoria", [
+        "2026-10-26 08:00:01 INFO [Ana] Usuario: ana@correo.test",
+        f"2026-10-26 08:00:02 ERROR clave {SECRETO} rechazada para luis@correo.test",
+        "2026-10-26 08:00:03 INFO login correcto",
+    ])
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        estado, cuerpo = _get(srv, "/api/log?f=geovictoria")
+        assert estado == 200
+        for prohibido in (SECRETO, "ana@correo.test", "luis@correo.test"):
+            assert prohibido not in cuerpo
+        assert "login correcto" in cuerpo and "***" in cuerpo
+    finally:
+        srv.shutdown()
+
+
+def test_log_solo_acepta_los_logs_conocidos_y_devuelve_el_final(monitor_mod, empleados_json, tmp_path):
+    _escribir_log(tmp_path, "programador", [f"linea {i}" for i in range(1000)])
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        _, cuerpo = _get(srv, "/api/log?f=programador&n=30")
+        lineas = json.loads(cuerpo)["lineas"]
+        assert len(lineas) == 30 and lineas[-1] == "linea 999"
+
+        for malo in ("../employees", "..%5Cconfig%5Cemployees", "alertas"):
+            estado, cuerpo = _get(srv, f"/api/log?f={malo}")
+            assert estado == 200 and json.loads(cuerpo)["lineas"] == []
+
+        _, cuerpo = _get(srv, "/api/log?f=geovictoria")  # sin archivo hoy: vacío, sin error
+        assert json.loads(cuerpo)["lineas"] == []
+    finally:
+        srv.shutdown()
+
+
+def test_log_exige_token_si_hay_token(monitor_mod, empleados_json):
+    srv = _servidor(monitor_mod, empleados_json, token="CLAVE")
+    try:
+        assert _get(srv, "/api/log?f=programador")[0] == 401
+        assert _get(srv, "/api/log?f=programador&t=CLAVE")[0] == 200
+    finally:
+        srv.shutdown()

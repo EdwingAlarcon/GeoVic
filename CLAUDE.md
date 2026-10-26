@@ -41,7 +41,7 @@ pytest tests/test_empleados.py
 - `ver_estado.bat` — show current scheduler state (calls `scripts/verificar_estado.py`)
 - `diagnostico_sistema.bat` — scheduler instances, lock, registry, recent logs and today's alerts per user
 - `probar_login.bat [id|name]` — test ONE employee's login without marking (works for disabled employees too) and explain the failure (bad credentials, locked account, password change, 2FA…); logic lives in `src/diagnostico_login.py`
-- `ver_log_en_vivo.bat` — follow the scheduler log live
+- `ver_log_en_vivo.bat` — follow the scheduler log live (the monitor page also has a "Log en vivo" panel with usernames and passwords censored, so this window is optional)
 - `monitor.bat` — read-only live web monitor (`http://127.0.0.1:8765`): per-employee status, scheduler heartbeat, instance count, alerts. Logic in `src/estado_monitor.py` (pure, tested); server in `scripts/monitor.py`; never serves credentials
 - `actualizar_servidor.bat` (project root) — update an installed server from the extracted zip
 

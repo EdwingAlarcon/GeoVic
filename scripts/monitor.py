@@ -112,6 +112,39 @@ def leer_estado(ruta_empleados: Optional[Path] = None, ahora: Optional[datetime]
     )
 
 
+_LOGS_VISIBLES = {"programador": "programador", "geovictoria": "geovictoria"}
+_COLA_LOG = 256 * 1024  # solo se lee el final del archivo, aunque el log pese varios MB
+
+
+def _secretos(ruta_empleados: Optional[Path] = None) -> List[str]:
+    """Usuarios y contraseñas configurados: solo para censurar el log, jamás se envían."""
+    try:
+        empleados = dl.leer_empleados(ruta_empleados) if ruta_empleados else dl.leer_empleados()
+    except (ValueError, OSError):
+        return []
+    return [str(e[k]) for e in empleados for k in ("usuario", "password") if e.get(k)]
+
+
+def leer_log(nombre: str, cuantas: int = 150, ruta_empleados: Optional[Path] = None,
+             ahora: Optional[datetime] = None) -> Dict:
+    """Últimas líneas del log de hoy ("programador" o "geovictoria"), con usuarios y claves censurados.
+
+    Solo acepta esos dos nombres (nada de rutas libres) y nunca lanza por un archivo ausente.
+    """
+    if nombre not in _LOGS_VISIBLES:
+        return {"error": "log desconocido", "lineas": []}
+    cuantas = max(20, min(int(cuantas), 500))
+    ruta = bitacora.LOG_DIR / f"{_LOGS_VISIBLES[nombre]}_{(ahora or datetime.now()).strftime('%Y%m%d')}.log"
+    try:
+        with open(ruta, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - _COLA_LOG))
+            texto = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return {"archivo": ruta.name, "lineas": []}
+    return {"archivo": ruta.name, "lineas": estado_monitor.ultimas_lineas_censuradas(texto, cuantas, _secretos(ruta_empleados))}
+
+
 # --- Servidor ------------------------------------------------------------------
 
 class Monitor(ThreadingHTTPServer):
@@ -163,6 +196,14 @@ class Manejador(BaseHTTPRequestHandler):
             self._responder(200, PAGINA.encode("utf-8"))
         elif url.path == "/api/estado":
             self._responder(200, self.server.estado_json(), "application/json; charset=utf-8")
+        elif url.path == "/api/log":
+            consulta = parse_qs(url.query)
+            try:
+                cuantas = int((consulta.get("n") or ["150"])[0])
+            except ValueError:
+                cuantas = 150
+            cuerpo = leer_log((consulta.get("f") or ["programador"])[0], cuantas, self.server.ruta_empleados)
+            self._responder(200, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         else:
             self._responder(404, b"No encontrado", "text/plain; charset=utf-8")
 
@@ -191,6 +232,8 @@ td{padding:8px;border-bottom:1px solid var(--bd);vertical-align:top}tr:last-chil
 .f-crit td:first-child{box-shadow:inset 4px 0 0 var(--cr)}.dup{color:var(--av);font-weight:700}
 ul.act{list-style:none;margin:0;padding:0;max-height:330px;overflow:auto}ul.act li{padding:4px 0;border-bottom:1px solid var(--bd);display:flex;gap:10px;font-size:13.5px}
 ul.act .h{color:var(--mut);min-width:62px}ul.act .n{min-width:150px;font-weight:600}.error{color:var(--cr)}.aviso{color:var(--av)}
+pre.log{margin:0;max-height:380px;overflow:auto;font:12.5px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px}
+pre.log .e{color:var(--cr);font-weight:600}pre.log .w{color:var(--av)}summary{cursor:pointer}
 button{font:inherit;padding:5px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
 </style></head><body>
 <header id="cab" class="ok"><h1 id="titulo">Cargando…</h1><div class="sub" id="sub"></div><ul class="msgs" id="msgs"></ul></header>
@@ -199,6 +242,10 @@ button{font:inherit;padding:5px 12px;border-radius:8px;border:1px solid var(--bd
  <section class="card"><h2>Resumen del día</h2><div id="resumen"></div></section>
  <section class="card"><h2>Empleados</h2><div class="wrap"><table><thead><tr><th>Empleado</th><th>Entrada</th><th>Salida</th><th>Último login</th></tr></thead><tbody id="filas"></tbody></table></div></section>
  <section class="card"><h2>Actividad reciente</h2><ul class="act" id="act"></ul></section>
+ <section class="card"><details id="logbox"><summary><b>Log en vivo</b> <span class="small">(reemplaza la ventana "Log en vivo"; usuarios y claves ocultos)</span></summary>
+  <div class="small" style="margin:8px 0"><select id="logsel"><option value="programador">programador</option><option value="geovictoria">geovictoria (navegador)</option></select>
+   <label><input type="checkbox" id="logsolo"> solo avisos y errores</label> <span id="logarch"></span></div>
+  <pre id="logtxt" class="log">Abre este panel para ver el log.</pre></details></section>
  <div class="small">Solo lectura · se actualiza cada 5 s · <span id="ult"></span> · <button id="snd">🔔 Sonido: apagado</button></div>
 </main>
 <script>
@@ -268,7 +315,26 @@ async function ciclo(){
   try { const r = await fetch(URL_API, {cache:"no-store"}); if (r.status === 401) { document.getElementById("titulo").textContent = "Falta el token en la URL (?t=…)"; return; } pintar(await r.json()); }
   catch(e){ document.getElementById("titulo").textContent = "Sin conexión con el monitor"; document.getElementById("cab").className = "critico"; }
 }
-ciclo(); setInterval(ciclo, 5000);
+async function cicloLog(){
+  const caja = document.getElementById("logbox"); if (!caja.open) return;
+  const pre = document.getElementById("logtxt");
+  try {
+    const f = document.getElementById("logsel").value;
+    const r = await fetch("/api/log?f=" + f + "&n=300" + (T ? "&t=" + encodeURIComponent(T) : ""), {cache:"no-store"});
+    const d = await r.json(); const solo = document.getElementById("logsolo").checked;
+    const abajo = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+    pre.replaceChildren();
+    d.lineas.filter(l => !solo || /ERROR|WARNING|❌|⚠/.test(l)).forEach(l => {
+      pre.append(el("div", /ERROR|❌/.test(l) ? "e" : /WARNING|⚠/.test(l) ? "w" : "", l));
+    });
+    if (!pre.childNodes.length) pre.textContent = "Sin líneas todavía hoy.";
+    if (abajo) pre.scrollTop = pre.scrollHeight;
+    document.getElementById("logarch").textContent = d.archivo || "";
+  } catch(e){ pre.textContent = "No se pudo leer el log."; }
+}
+document.getElementById("logbox").addEventListener("toggle", cicloLog);
+document.getElementById("logsel").onchange = cicloLog; document.getElementById("logsolo").onchange = cicloLog;
+ciclo(); setInterval(ciclo, 5000); setInterval(cicloLog, 5000);
 </script></body></html>
 """
 
