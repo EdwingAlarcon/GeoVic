@@ -136,6 +136,12 @@ def leer_registro(emp_id: str) -> dict:
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
+    except ValueError as e:  # JSON ilegible (p. ej. truncado por un corte): se conserva como evidencia
+        logger.error(f"[{emp_id}] Registro ilegible ({e}): se guarda como .corrupto y se empieza uno nuevo")
+        try:
+            path.replace(path.with_name(f"{path.stem}.corrupto_{datetime.now():%Y%m%d_%H%M%S}.json"))
+        except OSError:
+            pass
     except Exception as e:
         logger.warning(f"[{emp_id}] Error leyendo registro: {e}")
     return {}
@@ -160,8 +166,7 @@ def guardar_registro(emp_id: str, tipo_marcaje: str, variacion_minutos: int = 0,
         for fecha in sorted(registro.keys(), reverse=True)[30:]:
             del registro[fecha]
 
-        with open(_registro_path(emp_id), "w", encoding="utf-8") as f:
-            json.dump(registro, f, indent=2, ensure_ascii=False)
+        bitacora.escribir_json_atomico(_registro_path(emp_id), registro)
 
         bitacora.registrar("registro", {"id": emp_id, "nombre": _NOMBRES.get(emp_id)},
                            tipo_marcaje=tipo_marcaje, origen=origen)

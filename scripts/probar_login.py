@@ -136,6 +136,42 @@ async def probar(emp, headless: bool, url: str) -> dict:
     return r
 
 
+def _veredicto(r):
+    """(exito, código de causa, explicación) a partir de la evidencia de `probar`."""
+    codigo, explicacion = dl.clasificar_resultado(r["url"], r["texto"] + " " + " ".join(r["mensajes"]))
+    exito = bool(r["salio_del_login"] and r["iframe"] and codigo == "sin_senal")
+    return exito, codigo, explicacion
+
+
+def _linea_resumen(emp, r) -> str:
+    exito, codigo, explicacion = _veredicto(r)
+    if exito and r["boton"] == "Salida":
+        estado = "✅ login OK · el portal ofrece 'Marcar Salida' → la ENTRADA ya está registrada"
+    elif exito and r["boton"] == "Entrada":
+        estado = "⚠️  login OK · el portal ofrece 'Marcar Entrada' → la ENTRADA NO está registrada"
+    elif exito:
+        estado = "✅ login OK · sin botón de marcaje visible (jornada completa o fuera de horario)"
+    elif r["salio_del_login"] and r["iframe"] is False and codigo == "sin_senal":
+        estado = "⚠️  login OK · no se encontró el módulo de marcaje (iframe)"
+    elif r["error"] and codigo == "sin_senal":
+        estado = f"❌ no se pudo hacer el login: {r['error'][:80]}"
+    else:
+        estado = f"❌ login fallido · {explicacion[:90]}"
+    extra = f"  [captura: {Path(r['captura']).name}]" if r["captura"] else ""
+    return f"{str(emp.get('id')):6s} {str(emp.get('nombre'))[:34]:35s} {estado}{extra}"
+
+
+async def probar_todos(empleados, headless: bool, url: str) -> int:
+    """Login de cada empleado en secuencia (uno por uno, nunca en paralelo) y una línea por cada uno."""
+    fallos = 0
+    for emp in empleados:
+        avisos = dl.revisar_credenciales(emp.get("usuario", ""), emp.get("password", ""))
+        r = await probar(emp, headless, url)
+        print(_linea_resumen(emp, r) + ("   ⚠️ " + "; ".join(avisos) if avisos else ""), flush=True)
+        fallos += 0 if _veredicto(r)[0] else 1
+    return fallos
+
+
 def _informe(emp, avisos, r) -> int:
     """Imprime el diagnóstico y devuelve el código de salida (0 = login correcto)."""
     print("\n" + "=" * 70)
@@ -151,8 +187,7 @@ def _informe(emp, avisos, r) -> int:
         print("  ✅ Sin problemas evidentes (espacios, caracteres invisibles)")
 
     print("\nResultado del login:")
-    codigo, explicacion = dl.clasificar_resultado(r["url"], r["texto"] + " " + " ".join(r["mensajes"]))
-    exito = r["salio_del_login"] and r["iframe"] and codigo == "sin_senal"
+    exito, codigo, explicacion = _veredicto(r)
 
     if exito and r["boton"]:
         print(f"  ✅ Login correcto. El portal ofrece 'Marcar {r['boton']}'.")
@@ -185,12 +220,34 @@ def main() -> int:
     parser.add_argument("empleado", nargs="?", help="id o parte del nombre (si se omite, se pregunta)")
     parser.add_argument("--headless", action="store_true", help="sin ventana (el portal puede detectarlo)")
     parser.add_argument("--si", action="store_true", help="no pedir confirmación")
+    parser.add_argument("--todos", action="store_true", help="probar a todos los empleados activos, uno tras otro")
+    parser.add_argument("--incluir-desactivados", action="store_true", help="con --todos, incluir a los desactivados")
     parser.add_argument("--url", default=Config.LOGIN_URL, help="URL del login (para pruebas)")
     parser.add_argument("--empleados", default=str(dl.EMPLOYEES_FILE), help="ruta de employees.json (para pruebas)")
     args = parser.parse_args()
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    if args.todos:
+        try:
+            empleados = [e for e in dl.leer_empleados(Path(args.empleados))
+                         if args.incluir_desactivados or e.get("activo", True)]
+        except ValueError as e:
+            print(f"❌ {e}")
+            return 2
+        if not args.si:
+            print(f"\nSe probará el login de {len(empleados)} empleados, uno tras otro, en el portal REAL.")
+            print("Cada prueba cuenta como un intento de login; no se marca nada.")
+            try:
+                input("Enter para continuar (Ctrl+C para cancelar)... ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelado.")
+                return 2
+        print(f"\nProbando {len(empleados)} empleados (una ventana a la vez; unos 15-20 s cada uno)...\n", flush=True)
+        fallos = asyncio.run(probar_todos(empleados, args.headless, args.url))
+        print(f"\nResumen: {len(empleados) - fallos} correctos · {fallos} con problema(s)\n")
+        return 0 if fallos == 0 else 1
 
     try:
         empleados = dl.leer_empleados(Path(args.empleados))

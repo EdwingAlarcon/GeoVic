@@ -28,6 +28,30 @@ def _ruta_latido() -> Path:
     return LOG_DIR / "latido.json"
 
 
+def escribir_json_atomico(ruta: Path, datos, reintentos: int = 10) -> None:
+    """Escribe `datos` como JSON sin dejar nunca el archivo a medias.
+
+    Escribe en un temporal y lo reemplaza de golpe: un corte a mitad de escritura no deja el destino
+    truncado (un registro truncado se lee como "sin marcajes" y podría repetir un marcaje). En Windows
+    el reemplazo falla si otro proceso (p. ej. el monitor) tiene el destino abierto justo en ese
+    instante, así que se reintenta unas décimas de segundo antes de rendirse.
+    """
+    temporal = ruta.with_suffix(".tmp")
+    with open(temporal, "w", encoding="utf-8") as f:
+        json.dump(datos, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    espera = threading.Event()
+    for intento in range(reintentos):
+        try:
+            os.replace(temporal, ruta)
+            return
+        except PermissionError:
+            if intento == reintentos - 1:
+                raise
+            espera.wait(0.1)
+
+
 def registrar(tipo: str, empleado: Optional[Dict] = None, **datos) -> None:
     """Agrega un evento a la bitácora de hoy. Nunca lanza excepciones."""
     try:
@@ -80,11 +104,8 @@ def escribir_latido(inicio: str, fase: str, plan: Dict, tick_scheduler: Optional
             "tick_scheduler": tick_scheduler,
             "plan": plan,
         }
-        destino = _ruta_latido()
         LOG_DIR.mkdir(exist_ok=True)
-        temporal = destino.with_suffix(".tmp")
-        temporal.write_text(json.dumps(datos, ensure_ascii=False), encoding="utf-8")
-        os.replace(temporal, destino)
+        escribir_json_atomico(_ruta_latido(), datos, reintentos=3)
     except Exception:
         pass
 

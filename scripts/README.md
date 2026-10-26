@@ -13,7 +13,7 @@ Doble clic en el `.bat` que necesites. Todos usan el Python del entorno virtual 
 | `ver_log_en_vivo.bat` | Sigue el log del programador en tiempo real |
 | `monitor.bat` | **Monitor web en vivo (solo lectura)**: por empleado, hora programada, estado (pendiente / marcada / **confirmada por el portal** / **NO confirmada** / **vencida**), último login y actividad; latido del programador, instancias y alertas. Abre `http://127.0.0.1:8765`. Deja la ventana abierta mientras lo uses |
 | `diagnostico_sistema.bat` | Instancias del programador, lock, registro, logs recientes y **alertas de hoy por usuario** |
-| `probar_login.bat` | Prueba el login de **un** empleado (también desactivado), **sin marcar**, y explica por qué falla: credenciales mal copiadas, contraseña rechazada, cuenta bloqueada, cambio de clave, segundo factor… Guarda una captura. Uso: `probar_login.bat emp15` |
+| `probar_login.bat` | Prueba el login de **un** empleado (también desactivado), **sin marcar**, y explica por qué falla: credenciales mal copiadas, contraseña rechazada, cuenta bloqueada, cambio de clave, segundo factor… Guarda una captura. Uso: `probar_login.bat emp15`. Con `probar_login.bat --todos` revisa a **todos los activos, uno por uno**, y dice si el portal ofrece "Marcar Salida" (entrada ya registrada) o "Marcar Entrada" (aún no); es la comprobación de verdad contra el portal. Nunca hace clic en un botón de marcaje |
 
 ## Marcaje manual y recuperación
 

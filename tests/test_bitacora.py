@@ -71,6 +71,53 @@ def test_escrituras_concurrentes_no_se_mezclan(tmp_path, monkeypatch):
     assert all(json.loads(l)["tipo"] == "login" for l in lineas)  # ninguna línea corrupta
 
 
+def test_escritura_atomica_ida_y_vuelta_sin_temporales(tmp_path):
+    ruta = tmp_path / "registro_e1.json"
+    bitacora.escribir_json_atomico(ruta, {"2026-10-26": {"ENTRADA": {"ejecutado": True}}})
+    bitacora.escribir_json_atomico(ruta, {"2026-10-27": {}})  # sobrescribe de golpe
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"2026-10-27": {}}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_escritura_atomica_no_deja_el_destino_a_medias_si_falla_antes_de_reemplazar(tmp_path):
+    ruta = tmp_path / "registro_e1.json"
+    ruta.write_text(json.dumps({"bueno": True}), encoding="utf-8")
+
+    class NoSerializable:
+        pass
+
+    try:
+        bitacora.escribir_json_atomico(ruta, {"x": NoSerializable()})  # falla al serializar, antes del reemplazo
+    except TypeError:
+        pass
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"bueno": True}  # el original sigue intacto
+
+
+def test_escritura_atomica_reintenta_si_windows_tiene_el_archivo_abierto(tmp_path, monkeypatch):
+    ruta = tmp_path / "registro_e1.json"
+    reales = bitacora.os.replace
+    intentos = {"n": 0}
+
+    def replace_bloqueado_dos_veces(origen, destino):
+        intentos["n"] += 1
+        if intentos["n"] <= 2:
+            raise PermissionError("el monitor tiene el archivo abierto")
+        return reales(origen, destino)
+
+    monkeypatch.setattr(bitacora.os, "replace", replace_bloqueado_dos_veces)
+    bitacora.escribir_json_atomico(ruta, {"ok": 1})
+    assert intentos["n"] == 3 and json.loads(ruta.read_text(encoding="utf-8")) == {"ok": 1}
+
+
+def test_escritura_atomica_se_rinde_tras_los_reintentos(tmp_path, monkeypatch):
+    monkeypatch.setattr(bitacora.os, "replace", lambda *a: (_ for _ in ()).throw(PermissionError("bloqueado")))
+    try:
+        bitacora.escribir_json_atomico(tmp_path / "x.json", {"a": 1}, reintentos=3)
+        assert False, "debía lanzar PermissionError"
+    except PermissionError:
+        pass
+
+
 def test_latido_ida_y_vuelta_y_atomico(tmp_path, monkeypatch):
     _aislar(tmp_path, monkeypatch)
     plan = {"emp1": {"mon": {"entrada": "08:00:10", "salida": "17:00:10"}}}
