@@ -14,26 +14,34 @@ from typing import List, Optional
 _SCRIPT = "programador.py"
 
 
-def _es_programador(p) -> bool:
+def _es_programador(p, incluir_ventanas: bool = False) -> bool:
+    """Proceso python de programador.py; con `incluir_ventanas`, también la consola `cmd /k` que lo envuelve."""
     try:
         nombre = (p.info.get("name") or "").lower()
-        return nombre.startswith("python") and any(_SCRIPT in (parte or "") for parte in (p.info.get("cmdline") or []))
+        es_candidato = nombre.startswith("python") or (incluir_ventanas and nombre in ("cmd", "cmd.exe"))
+        return es_candidato and any(_SCRIPT in (parte or "") for parte in (p.info.get("cmdline") or []))
     except Exception:
         return False
 
 
-def procesos_programador() -> List:
-    """Procesos del programador (el lanzador del venv y su intérprete cuentan por separado)."""
+def procesos_programador(incluir_ventanas: bool = False) -> List:
+    """Procesos del programador (el lanzador del venv y su intérprete cuentan por separado).
+
+    Por defecto solo procesos python: sirve para saber si el programador corre. Con `incluir_ventanas`
+    añade las consolas `cmd /k` que lo envuelven, que quedan abiertas y vacías cuando el python muere.
+    """
     import psutil
 
-    return [p for p in psutil.process_iter(["pid", "name", "cmdline"]) if _es_programador(p) and p.pid != os.getpid()]
+    return [p for p in psutil.process_iter(["pid", "name", "cmdline"])
+            if _es_programador(p, incluir_ventanas) and p.pid != os.getpid()]
 
 
 def detener(espera_seg: float = 10.0) -> int:
-    """Cierra el programador. Devuelve cuántos procesos terminó; lanza RuntimeError si alguno sigue vivo."""
+    """Cierra el programador y su ventana de consola. Devuelve cuántos procesos terminó; lanza RuntimeError
+    si alguno sigue vivo. Cerrar también la consola evita que se acumulen ventanas vacías."""
     import psutil
 
-    procesos = procesos_programador()
+    procesos = procesos_programador(incluir_ventanas=True)
     for p in procesos:
         try:
             p.terminate()
@@ -67,7 +75,19 @@ def _lanzar(raiz: Path, argumentos: List[str], python: Optional[str] = None) -> 
 
 
 def iniciar(raiz: Path, python: Optional[str] = None) -> int:
-    """Lanza el programador desacoplado de este proceso y sin ventana. Devuelve el PID del lanzador."""
+    """Lanza el programador desacoplado de este proceso. Devuelve el PID del lanzador.
+
+    En Windows abre una ventana de consola visible ("Programador GeoVictoria", con `cmd /k` para poder ver
+    el log), igual que actualizar_servidor.bat: así el navegador sigue visible en la sesión del usuario y
+    no hay un programador "invisible" que nadie sepa dónde cerrar. En otros sistemas, sin ventana.
+    """
+    python = python or sys.executable
+    if sys.platform == "win32":
+        # Cadena completa (no lista): las comillas externas de `cmd /k ""python" script"` hacen falta si la
+        # ruta de python tiene espacios, y list2cmdline no las genera.
+        linea = f'cmd /c start "Programador GeoVictoria" /D "{raiz}" cmd /k ""{python}" {Path("src") / _SCRIPT}"'
+        return subprocess.Popen(linea, cwd=str(raiz), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW).pid
     return _lanzar(raiz, [str(Path("src") / _SCRIPT)], python)
 
 

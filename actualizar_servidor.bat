@@ -75,12 +75,13 @@ echo.
 echo Destino: %TARGET%
 echo Se conservan: .env, config\employees.json, config\festivos_adicionales.json, src\logs, .venv
 echo.
-echo [1/5] Deteniendo el programador...
+echo [1/5] Cerrando el programador y el monitor en marcha, con sus ventanas...
 schtasks /end /tn "%TASK%" >nul 2>&1
-REM Solo procesos python cuya linea de comandos contiene programador.py; no toca otros python.
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'programador\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
-REM El monitor (solo lectura) tambien se cierra: si no, seguiria sirviendo el codigo viejo y ocuparia el puerto.
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'monitor\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+REM Se cierran los procesos python Y las ventanas de consola (cmd) que los envuelven: si solo se mata el
+REM python, la ventana "cmd /k" queda abierta y vacia y se acumula una mas en cada actualizacion. Tambien
+REM las ventanas viejas ya acumuladas y la de "Log en vivo". Solo toca procesos del proyecto (por su linea de
+REM comandos); no toca otros python ni este mismo actualizador.
+powershell -NoProfile -Command "$yo = $PID; Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $yo -and ( ($_.Name -match '^(python|pythonw|cmd)(\.exe)?$' -and $_.CommandLine -match 'programador\.py|monitor\.py|\\monitor\.bat|\\iniciar_programador\.bat|\\ver_log_en_vivo\.bat') -or ($_.Name -match '^(powershell|pwsh)(\.exe)?$' -and $_.CommandLine -match 'programador_\*\.log') ) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Write-Host ('      cerrado: ' + $_.Name + ' PID ' + $_.ProcessId) }"
 ping -n 4 127.0.0.1 >nul
 if exist "%TARGET%\src\logs\programador.lock" del /F /Q "%TARGET%\src\logs\programador.lock"
 
@@ -107,11 +108,17 @@ for %%F in (
     instalar_psutil.bat instalar_dependencias.bat iniciar_programador_vigilado.bat
     SOLUCION_HOY.bat habilitar_tareas.bat iniciar_sin_reiniciar.bat
     reiniciar_con_correcciones.bat reiniciar_optimizado.bat ver_estado_detallado.bat
+    modo_oculto.bat iniciar_oculto.bat
 ) do (
     if exist "%TARGET%\scripts\%%F" (
         del /F /Q "%TARGET%\scripts\%%F"
         echo       eliminado scripts\%%F
     )
+)
+REM El modo oculto se retiro: se borra su marcador para que no quede configuracion muerta.
+if exist "%TARGET%\config\modo_oculto.flag" (
+    del /F /Q "%TARGET%\config\modo_oculto.flag"
+    echo       eliminado config\modo_oculto.flag
 )
 for %%F in (CONFIGURAR_TAREA_WINDOWS.md INICIAR_SIN_REINICIAR.md INSTALACION.md) do (
     if exist "%TARGET%\docs\%%F" (
@@ -162,18 +169,11 @@ if errorlevel 1 (
     echo       OK
 )
 
-REM Modo oculto: si existe config\modo_oculto.flag se arranca sin ventanas y con el navegador headless
-REM (scripts\iniciar_oculto.bat). Se activa con scripts\activar_modo_oculto.bat. Sin el archivo, todo igual que antes.
-if exist "%TARGET%\config\modo_oculto.flag" (
-    echo [4/5] Iniciando programador y monitor OCULTOS ^(modo oculto activado^)...
-    call "%TARGET%\scripts\iniciar_oculto.bat" nopause
-) else (
-    echo [4/5] Iniciando el programador en una ventana nueva ^(navegador visible^)...
-    REM Ventana de consola propia, con el navegador visible en tu sesion. No se crea ninguna Tarea Programada.
-    start "Programador GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" src\programador.py"
-    REM Monitor web en su propia ventana, sin abrir el navegador: http://127.0.0.1:8765
-    start "Monitor GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" scripts\monitor.py"
-)
+echo [4/5] Iniciando el programador y el monitor en ventanas nuevas ^(navegador visible^)...
+REM Una ventana de consola por proceso, con el navegador visible en tu sesion. No se crea ninguna Tarea
+REM Programada. El monitor abre solo la pagina de monitoreo en el navegador: http://127.0.0.1:8765
+start "Programador GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" src\programador.py"
+start "Monitor GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" scripts\monitor.py --abrir"
 ping -n 8 127.0.0.1 >nul
 
 echo [5/5] Verificando...
@@ -185,12 +185,8 @@ echo ================================================
 echo   ACTUALIZACION COMPLETADA
 echo ================================================
 echo.
-if exist "%TARGET%\config\modo_oculto.flag" (
-    echo Modo oculto: no hay consolas ^(el navegador aparece unos segundos al marcar^). Todo se ve y se controla en http://127.0.0.1:8765
-) else (
-    echo Deja abiertas las ventanas "Programador GeoVictoria" y "Monitor GeoVictoria" ^(puedes minimizarlas, no cerrarlas^).
-    echo Monitor en vivo ^(con botones para reiniciar/detener^): http://127.0.0.1:8765
-)
+echo Deja abiertas las ventanas "Programador GeoVictoria" y "Monitor GeoVictoria" ^(puedes minimizarlas, no cerrarlas^).
+echo Monitor en vivo ^(con botones para reiniciar/detener^): http://127.0.0.1:8765
 echo Verifica con: %TARGET%\scripts\ver_estado.bat
 echo.
 pause

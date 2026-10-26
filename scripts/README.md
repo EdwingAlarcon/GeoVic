@@ -9,9 +9,7 @@ Doble clic en el `.bat` que necesites. Todos usan el Python del entorno virtual 
 | `iniciar_programador.bat` | Inicia el programador en una ventana "Programador GeoVictoria" (déjala abierta; puedes minimizarla) |
 | `reiniciar_programador.bat` | Lo detiene y lo vuelve a iniciar. Úsalo tras editar `config\employees.json` o `config\festivos_adicionales.json`: el programador solo lee esos archivos al arrancar |
 | `detener_programador.bat` | Lo detiene matando solo los procesos de `programador.py` (no toca otros Python) |
-| `iniciar_oculto.bat` | Programador y monitor **sin consolas** (ocultas). **El navegador sigue visible**: aparece unos segundos al marcar. No usa headless a propósito (el 26-oct-2026 los clics hechos así no se guardaron en el portal real). Detiene antes lo que haya, así que también reinicia. Todo se ve en `http://127.0.0.1:8765` |
 | `detener_monitor.bat` | Detiene solo el monitor (procesos de `monitor.py`); no toca el programador |
-| `modo_oculto.bat` | **Interruptor** del modo oculto (consolas ocultas, navegador visible): cada ejecución lo enciende o apaga y reinicia lo que corre. Encendido, `actualizar_servidor.bat` y el arranque con Windows también arrancan sin consolas (marcador `config\modo_oculto.flag`, propio de cada instalación) |
 | `inicio_con_windows.bat` | **Interruptor** del arranque con Windows: crea o borra un acceso directo en la carpeta Inicio que lanza `iniciar_al_inicio.bat` al iniciar sesión. Sin Tareas Programadas ni Administrador. Solo arranca si ese usuario inicia sesión tras el reinicio |
 | `ver_estado.bat` | Muestra qué marcajes se registraron hoy |
 | `ver_log_en_vivo.bat` | Sigue el log del programador en tiempo real. Opcional: el monitor ya trae el panel **Log en vivo** (con usuarios y claves ocultos) |
@@ -35,7 +33,7 @@ Doble clic en el `.bat` que necesites. Todos usan el Python del entorno virtual 
 | `ver_festivos.bat` | Festivos de Colombia del año |
 | `eliminar_tarea_programada.bat` | Quita la Tarea Programada "GeoVictoria Programador" si quedó de una versión anterior |
 
-En la raíz del proyecto: `setup.bat` (primera instalación), `actualizar_servidor.bat` (actualizar desde el zip) y `exportar_proyecto.bat` (generar el zip).
+En la raíz del proyecto: `setup.bat` (primera instalación), `actualizar_servidor.bat` (actualizar desde el zip: primero cierra el programador y el monitor **con sus ventanas**, incluidas las vacías que se hayan acumulado, y luego deja una consola de cada uno y abre la página del monitor) y `exportar_proyecto.bat` (generar el zip).
 
 ## Una sola instancia
 
