@@ -10,6 +10,11 @@ from typing import Dict, Optional
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
+try:
+    from src.control_concurrencia import CupoNavegador, maximo_navegadores_desde_entorno
+except ImportError:  # ejecución directa: python src/geovictoria.py
+    from control_concurrencia import CupoNavegador, maximo_navegadores_desde_entorno
+
 
 class Config:
     LOGIN_URL = "https://clients.geovictoria.com/account/login?ReturnUrl=%2f"
@@ -20,7 +25,13 @@ class Config:
     RETRY_DELAY = 1
     # Visible por defecto; en servidor sin sesión interactiva se fuerza con GEOVICTORIA_HEADLESS=1
     HEADLESS = os.getenv("GEOVICTORIA_HEADLESS", "").strip().lower() in ("1", "true", "yes")
-    LOGIN_TIMEOUT = 10000
+    # Con varios navegadores a la vez el login puede tardar; 10 s daba timeouts falsos en horas pico
+    LOGIN_TIMEOUT = 25000
+    # Navegadores simultáneos como máximo (el resto de jobs espera). GEOVICTORIA_MAX_NAVEGADORES lo cambia.
+    MAX_NAVEGADORES = maximo_navegadores_desde_entorno()
+
+
+_cupo_navegador = CupoNavegador(Config.MAX_NAVEGADORES)
 
 
 # --- Selectores CSS desde config/selectors.json ---
@@ -169,18 +180,6 @@ async def verificar_boton_disponible(target_frame, tag: str = "") -> Optional[st
     return None
 
 
-async def marcar_asistencia(target_frame, tag: str = "") -> Optional[str]:
-    """Ejecuta el marcaje de entrada o salida y confirma que el portal lo registró."""
-    try:
-        btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
-        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.info(f"{tag}Haciendo clic en 'Marcar Entrada'...")
-        await btn.click(force=True)
-        if not await _confirmar_marcaje(btn, "Salida", tag):
-            return None
-        logger.info(f"{tag}✅ Marcaje de Entrada realizado")
-        return "Entrada"
-
 CONFIRMACION_TIMEOUT = 15000
 
 
@@ -199,6 +198,18 @@ async def _confirmar_marcaje(btn, nombre: str, tag: str = "") -> bool:
         return False
 
 
+async def marcar_asistencia(target_frame, tag: str = "") -> Optional[str]:
+    """Ejecuta el marcaje de entrada o salida y confirma que el portal lo registró."""
+    try:
+        btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
+        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+        logger.info(f"{tag}Haciendo clic en 'Marcar Entrada'...")
+        await btn.click(force=True)
+        if not await _confirmar_marcaje(btn, "Entrada", tag):
+            return None
+        logger.info(f"{tag}✅ Marcaje de Entrada realizado")
+        return "Entrada"
+
     except PlaywrightTimeoutError:
         pass
 
@@ -207,7 +218,7 @@ async def _confirmar_marcaje(btn, nombre: str, tag: str = "") -> bool:
         await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
         logger.info(f"{tag}Haciendo clic en 'Marcar Salida'...")
         await btn.click(force=True)
-        if not await _confirmar_marcaje(btn, "Entrada", tag):
+        if not await _confirmar_marcaje(btn, "Salida", tag):
             return None
         logger.info(f"{tag}✅ Marcaje de Salida realizado")
         return "Salida"
@@ -241,7 +252,7 @@ async def verificar_estado(empleado: Optional[Dict] = None) -> Optional[str]:
         usuario, password = get_credentials(empleado)
         logger.debug(f"{tag}🔍 Verificando estado...")
 
-        async with async_playwright() as p:
+        async with _cupo_navegador.reservar(tag), async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=False,
                 args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-sandbox"],
@@ -290,7 +301,7 @@ async def run(accion_esperada: Optional[str] = None, empleado: Optional[Dict] = 
             logger.info(f"{tag}Acción esperada: {accion_esperada}")
         logger.info("=" * 60)
 
-        async with async_playwright() as p:
+        async with _cupo_navegador.reservar(tag), async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=Config.HEADLESS,
                 args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-sandbox"],

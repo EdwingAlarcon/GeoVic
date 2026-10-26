@@ -15,12 +15,14 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.cache_estado import get_cache
+from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica
 from src.empleados import cargar_empleados, obtener_horario_dia
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import run, verificar_estado
@@ -31,7 +33,8 @@ from src.geovictoria import run, verificar_estado
 
 log_dir = Path(__file__).parent / "logs"
 log_dir.mkdir(exist_ok=True)
-lock_file = log_dir / "programador.lock"
+lock_file = log_dir / "programador.lock"  # PID del programador activo (informativo)
+guard_file = log_dir / "programador.guard"  # solo POSIX: archivo bloqueado con flock; no borrar
 alerta_file = log_dir / "alertas.log"
 
 # ---------------------------------------------------------------------------
@@ -554,50 +557,35 @@ def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict, e
 # Lock file (previene múltiples instancias del programador)
 # ---------------------------------------------------------------------------
 
-def _es_programador_vivo(pid: int) -> bool:
-    """True solo si el PID es realmente otro programador.py en ejecución.
-
-    Tras un reinicio del servidor Windows puede reasignar el PID del lock viejo a
-    un proceso cualquiera; pid_exists() solo no basta para distinguirlo.
-    """
-    import psutil
-    if pid == os.getpid():
-        return False
+def _pid_en_lock() -> Optional[int]:
     try:
-        cmdline = psutil.Process(pid).cmdline()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return False
-    return any("programador.py" in parte.lower() for parte in cmdline)
+        return int(lock_file.read_text().strip())
+    except (OSError, ValueError):
+        return None
 
 
 def crear_lock_file() -> None:
-    if lock_file.exists():
-        try:
-            with open(lock_file, "r") as f:
-                pid = int(f.read().strip())
+    """Toma la exclusión de instancia única y deja el PID en el lock file (informativo).
 
-            if _es_programador_vivo(pid):
-                logger.error(f"❌ Programador ya en ejecución (PID {pid}) — detenga esa instancia primero")
-                sys.exit(1)
-            else:
-                logger.warning(f"⚠️ Lock obsoleto (PID {pid} no existe) — recreando")
-                lock_file.unlink()
+    La exclusión real la da el sistema operativo (ver control_concurrencia), no el archivo:
+    borrar el lock no permite arrancar un segundo programador.
+    """
+    try:
+        adquirir_instancia_unica(guard_file)
+    except InstanciaYaEnEjecucion:
+        pid = _pid_en_lock()
+        detalle = f" (PID {pid})" if pid else ""
+        logger.error(f"❌ Programador ya en ejecución{detalle} — detenga esa instancia primero")
+        sys.exit(1)
 
-        except (ValueError, ImportError) as e:
-            logger.warning(f"⚠️ No se pudo verificar lock existente ({e}) — recreando")
-            lock_file.unlink(missing_ok=True)
-        except Exception as e:
-            logger.warning(f"⚠️ Error verificando lock: {e} — recreando")
-            lock_file.unlink(missing_ok=True)
-
-    with open(lock_file, "w") as f:
-        f.write(str(os.getpid()))
+    lock_file.write_text(str(os.getpid()))
     logger.info(f"🔒 Lock creado: PID {os.getpid()}")
 
 
 def eliminar_lock_file() -> None:
     try:
-        if lock_file.exists():
+        # Solo si es el nuestro: un duplicado rechazado no debe borrar el lock del activo
+        if _pid_en_lock() == os.getpid():
             lock_file.unlink()
             logger.info("🔓 Lock eliminado")
     except Exception as e:
@@ -660,7 +648,14 @@ def main() -> None:
             logger.error(f"❌ Error verificando pendientes de {emp.get('nombre', emp.get('id'))}: {e}", exc_info=True)
 
     # Crear y configurar scheduler
-    scheduler = BlockingScheduler(timezone="America/Bogota")
+    # Los jobs pueden quedar esperando cupo de navegador (control_concurrencia): más hilos que el
+    # defecto (10) para que esperar no deje sin hilo a otros jobs, y 5 min de gracia para que un
+    # job retrasado se ejecute en vez de descartarse (APScheduler usa 1 s por defecto).
+    scheduler = BlockingScheduler(
+        timezone="America/Bogota",
+        executors={"default": ThreadPoolExecutor(20)},
+        job_defaults={"misfire_grace_time": 300},
+    )
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     for idx, emp in enumerate(empleados):

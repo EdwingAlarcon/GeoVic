@@ -47,13 +47,14 @@ pytest tests/test_empleados.py
 **`geovictoria.py`** — Core browser automation layer. Key functions:
 - `run(accion_esperada, empleado)` — Opens Chromium, logs in, clicks the available marking button. If `accion_esperada` is set ("Entrada"/"Salida"), validates that the expected button matches before clicking.
 - `verificar_estado(empleado)` — Same login flow but only checks which button is visible, without clicking. Used by the scheduler to sync state.
-- `Config` class — Tune timeouts and headless mode here; `HEADLESS = False` keeps the browser visible.
+- `Config` class — Tune timeouts and headless mode here; `HEADLESS = False` keeps the browser visible. `MAX_NAVEGADORES` (env `GEOVICTORIA_MAX_NAVEGADORES`, default 3) caps simultaneous Chromium instances: extra jobs wait for a slot instead of failing login under load. `LOGIN_TIMEOUT` is 25 s.
 - CSS selectors are loaded from `config/selectors.json` at import time (falls back to hardcoded defaults if file is missing).
 
 **`programador.py`** — APScheduler-based scheduler. Key behaviors:
 - Uses `BlockingScheduler` with `CronTrigger` in `America/Bogota` timezone.
 - Schedules 4–5 jobs per employee: entrada L-V, salida L-V, entrada sábado, salida sábado, plus an hourly `verificar_pendientes_emp` that catches missed markings (e.g., PC started late).
-- Uses a **lock file** (`src/logs/programador.lock`) to prevent multiple instances. If the process is hard-killed, delete the lock file manually before restarting.
+- Enforces a **single instance per machine** via `src/control_concurrencia.py` (named Windows mutex; `flock` on POSIX). Deleting the lock file does not allow a second instance, and the exclusion is released automatically if the process dies, so no manual cleanup is needed after a crash or reboot. A second launch exits with "Programador ya en ejecución". `src/logs/programador.lock` only holds the PID, for information.
+- The thread pool has 20 workers and jobs get `misfire_grace_time=300`, so jobs waiting for a browser slot are not dropped as missed.
 - Salida jobs check that the corresponding entrada was already registered; if not, they call `verificar_estado` to detect entries made outside the scheduler (manual or via portal).
 - `HorarioConfig.COOLDOWN_ENTRE_MARCAJES = 300` — minimum seconds between two markings for the same employee.
 - Validation window for scheduled jobs: ±30 minutes around the configured time; markings outside that window are skipped.
@@ -80,7 +81,7 @@ pytest tests/test_empleados.py
 - `programador_YYYYMMDD.log` — scheduler event log.
 - `registro_{emp_id}.json` / `registro_ejecuciones.json` — JSON registry tracking which markings were executed today (last 30 days). Used to prevent double-markings.
 - `alertas.log` — append-only file written when a marking fails; useful for external monitoring.
-- `programador.lock` — PID file. Delete manually if the scheduler crashed without cleanup.
+- `programador.lock` — PID of the running scheduler (informational). Stale locks are harmless: the real single-instance guard is the OS-level lock.
 
 ### Key Constraints
 
