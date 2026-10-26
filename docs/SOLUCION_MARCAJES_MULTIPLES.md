@@ -108,7 +108,7 @@ Se eliminó el registro incorrecto del día 2026-02-09 para permitir que el sist
 - Revise los logs en `src/logs/` regularmente
 - Verifique que solo haya UN proceso del programador corriendo:
   ```
-  scripts\ver_estado_detallado.bat
+  scripts\ver_estado.bat
   ```
 
 ## Comportamiento Esperado Ahora

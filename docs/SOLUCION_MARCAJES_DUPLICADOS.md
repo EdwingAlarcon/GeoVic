@@ -80,7 +80,7 @@ Get-Process | Where-Object {$_.ProcessName -match "python"} | Format-Table Proce
 Para verificar que todo está funcionando correctamente:
 
 ```cmd
-scripts\ver_estado_detallado.bat
+scripts\ver_estado.bat
 ```
 
 Revise:

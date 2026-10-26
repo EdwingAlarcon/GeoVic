@@ -62,7 +62,7 @@ docs\                    - Documentación adicional
    └─ Ejecute: playwright install chromium
 
 ❌ Marcajes duplicados
-   └─ Ejecute: scripts\SOLUCION_HOY.bat
+   └─ Ejecute: scripts\reiniciar_programador.bat (deja una sola instancia corriendo)
 
 
 🔧 VERIFICAR INSTALACIÓN

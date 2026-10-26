@@ -85,4 +85,4 @@ pip list | findstr playwright
 ---
 
 ## 📚 **Para más detalles:**
-Ver: **INSTALACION.md**
+Ver: **INSTALACION_COMPLETA.md**

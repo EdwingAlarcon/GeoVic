@@ -165,12 +165,10 @@ if !PROCESO_ENCONTRADO!==0 (
     echo.
     echo Para iniciarlo:
     echo   1. Ejecutar: scripts\iniciar_programador.bat
-    echo   2. O configurar Tarea Programada de Windows (ver CONFIGURAR_TAREA_WINDOWS.md^)
     echo.
 )
 
-echo Para mas informacion sobre configuracion:
-echo   - Ver: CONFIGURAR_TAREA_WINDOWS.md
+echo Para mas informacion:
 echo   - Logs en: src\logs\
 echo   - Verificar estado: scripts\ver_estado.bat
 echo.

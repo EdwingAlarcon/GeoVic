@@ -209,7 +209,7 @@ python src/programador.py
 
 #### **Windows:**
 ```powershell
-.\scripts\ver_estado_detallado.bat
+.\scripts\ver_estado.bat
 ```
 
 #### **Linux/Mac:**
@@ -336,7 +336,7 @@ pip install -r requirements.txt
 
 Si tienes problemas:
 1. Revisa los logs en `src/logs/`
-2. Ejecuta el verificador de estado: `scripts\ver_estado_detallado.bat`
+2. Ejecuta el verificador de estado: `scripts\ver_estado.bat`
 3. Verifica que todas las dependencias estén instaladas
 
 ---

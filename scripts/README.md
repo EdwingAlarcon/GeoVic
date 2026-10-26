@@ -43,7 +43,6 @@ Si prefieres ejecutar cada paso manualmente, haz doble clic en cada archivo en o
 Después de la corrección, verifica que todo esté OK:
 
 📄 `ver_estado.bat` - Estado general
-📄 `ver_estado_detallado.bat` - Estado detallado con proceso
 
 ---
 
@@ -86,7 +85,6 @@ Ejecuta primero: `instalar_dependencias.bat`
 | `diagnostico_sistema.bat` | Diagnóstico completo |
 | `iniciar_programador.bat` | Inicia el programador |
 | `ver_estado.bat` | Ver estado general |
-| `ver_estado_detallado.bat` | Ver estado detallado |
 
 ---
 

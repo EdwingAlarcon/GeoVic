@@ -142,7 +142,7 @@ Para instalar este proyecto en otro PC o servidor:
 3. **Configure** el archivo `.env` con las credenciales del usuario
 4. **Listo** para usar
 
-📖 Ver [COMO_EXPORTAR.md](COMO_EXPORTAR.md) para guía completa de distribución
+📖 Ver [COMO_EXPORTAR.md](docs/COMO_EXPORTAR.md) para guía completa de distribución
 
 ---
 
@@ -329,10 +329,6 @@ pip install pytz tzdata
 - Ver: [docs/SOLUCION_MARCAJES_DUPLICADOS.md](docs/SOLUCION_MARCAJES_DUPLICADOS.md)
 - Ejecutar: `scripts\corregir_problema_completo.bat`
 
-### Configurar tarea programada en Windows
-- Ver: [docs/CONFIGURAR_TAREA_WINDOWS.md](docs/CONFIGURAR_TAREA_WINDOWS.md)
-- Ejecutar: `scripts\configurar_tarea_windows.ps1`
-
 ## 📝 Ejemplo de Salida del Programador
 
 ```
@@ -377,7 +373,6 @@ Hora: 2026-01-23 07:00:15
 - 📖 [Guía de Instalación](docs/GUIA_INSTALACION.md) - Guía completa paso a paso
 - 📖 [Instalación Completa](docs/INSTALACION_COMPLETA.md) - Instalación detallada con opciones
 - 📖 [Instalación Rápida](docs/INSTALACION_RAPIDA.md) - Instalación express en minutos
-- 📖 [Configurar Tarea Windows](docs/CONFIGURAR_TAREA_WINDOWS.md) - Automatización en Windows
 
 ### 📦 Distribución y Exportación
 - 📖 [Cómo Exportar](docs/COMO_EXPORTAR.md) - Exportar el proyecto a otro PC

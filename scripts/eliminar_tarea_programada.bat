@@ -22,8 +22,8 @@ if %errorlevel%==0 (
     echo.
     echo [OK] Tarea eliminada correctamente
     echo.
-    echo Para volver a configurarla:
-    echo   scripts\configurar_tarea_windows.ps1
+    echo El programador ya no arrancara solo. Para iniciarlo:
+    echo   scripts\iniciar_programador.bat
 ) else (
     echo.
     echo [INFO] No se encontro la tarea
