@@ -19,6 +19,7 @@ def monitor_mod():
     spec = importlib.util.spec_from_file_location("monitor_script", RUTA)
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)
+    modulo.contar_instancias()  # la primera lectura de procesos tarda ~6 s en Windows: el monitor real también la calienta al arrancar
     return modulo
 
 
@@ -40,7 +41,7 @@ def _servidor(monitor_mod, ruta, token=None):
 
 
 def _get(srv, camino, cabeceras=None):
-    c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+    c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=30)
     c.request("GET", camino, headers=cabeceras or {})
     r = c.getresponse()
     return r.status, r.read().decode("utf-8")
@@ -192,7 +193,7 @@ def test_log_exige_token_si_hay_token(monitor_mod, empleados_json):
 # --- Botones de control: POST /api/accion --------------------------------------
 
 def _post(srv, cuerpo, cabeceras=None, camino="/api/accion"):
-    c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+    c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=30)
     c.request("POST", camino, body=json.dumps(cuerpo), headers={"Content-Type": "application/json", **(cabeceras or {})})
     r = c.getresponse()
     return r.status, json.loads(r.read().decode("utf-8"))
