@@ -90,8 +90,31 @@ if not errorlevel 1 (
     schtasks /query /tn "%TASK%" >nul 2>&1
     if not errorlevel 1 echo       [AVISO] No se pudo quitar la tarea. Ejecuta scripts\eliminar_tarea_programada.bat como Administrador.
 )
-for %%F in (instalar_tarea_servidor.bat instalar_tarea_servidor.ps1 servicio_programador.bat) do (
-    if exist "%TARGET%\scripts\%%F" del /F /Q "%TARGET%\scripts\%%F"
+REM Scripts y docs retirados en versiones anteriores. robocopy no borra nada del destino, asi que
+REM se eliminan aqui por nombre exacto: sobre todo los que mataban todos los python.exe
+REM (detener_todas_instancias, corregir_problema_completo) no deben quedar en el servidor.
+for %%F in (
+    instalar_tarea_servidor.bat instalar_tarea_servidor.ps1 servicio_programador.bat
+    configurar_tarea_windows.bat configurar_tarea_windows.ps1 ejecutar_tarea_programada.bat
+    estado_tarea_programada.bat instalar_autoarranque.bat instalar_autoarranque.ps1
+    desinstalar_autoarranque.bat detener_tarea_programada.bat detener_todas_instancias.bat
+    corregir_problema_completo.bat diagnostico_completo.bat diagnostico_estado.bat
+    diagnostico_estado_completo.py verificar_lock_obsoleto.bat verificar_lock_obsoleto.py
+    validar_optimizaciones.py prueba_verificacion_estado.py marcar_salida_ahora.py
+    instalar_psutil.bat instalar_dependencias.bat iniciar_programador_vigilado.bat
+    SOLUCION_HOY.bat habilitar_tareas.bat iniciar_sin_reiniciar.bat
+    reiniciar_con_correcciones.bat reiniciar_optimizado.bat ver_estado_detallado.bat
+) do (
+    if exist "%TARGET%\scripts\%%F" (
+        del /F /Q "%TARGET%\scripts\%%F"
+        echo       eliminado scripts\%%F
+    )
+)
+for %%F in (CONFIGURAR_TAREA_WINDOWS.md INICIAR_SIN_REINICIAR.md INSTALACION.md) do (
+    if exist "%TARGET%\docs\%%F" (
+        del /F /Q "%TARGET%\docs\%%F"
+        echo       eliminado docs\%%F
+    )
 )
 echo       OK
 
