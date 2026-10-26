@@ -210,3 +210,60 @@ def test_el_estado_jamas_incluye_credenciales():
     e = estado([secreto], registros={"e1": registro()})
     texto = json.dumps(e, ensure_ascii=False)
     assert "S3cr3t0-Unico" not in texto and "ana@correo.test" not in texto
+
+
+# --- Reconciliación de confirmaciones y bloqueo de reinicio ---------------------
+
+def _conf(emp_id="e1", accion="Entrada", confirmada=True):
+    return {"tipo": "confirmacion", "emp_id": emp_id, "accion": accion, "confirmada": confirmada}
+
+
+def test_marcaje_del_programador_sin_confirmacion_se_reconcilia():
+    hoy = registro()["2026-10-26"]
+    assert em.marcajes_sin_confirmar(hoy, [], "e1") == [("ENTRADA SEMANA (L-V)", "Entrada")]
+
+
+def test_no_se_reconcilia_lo_ya_confirmado_ni_lo_detectado_en_el_portal():
+    assert em.marcajes_sin_confirmar(registro()["2026-10-26"], [_conf()], "e1") == []
+    assert em.marcajes_sin_confirmar(registro()["2026-10-26"], [_conf(confirmada=False)], "e1") == []  # ya alertó
+    assert em.marcajes_sin_confirmar(registro(origen="portal")["2026-10-26"], [], "e1") == []
+
+
+def test_confirmacion_no_concluyente_o_de_otro_empleado_si_se_reconcilia():
+    hoy = registro()["2026-10-26"]
+    assert em.marcajes_sin_confirmar(hoy, [_conf(confirmada=None)], "e1")
+    assert em.marcajes_sin_confirmar(hoy, [_conf(emp_id="e2")], "e1")
+
+
+def test_marca_de_version_anterior_sin_origen_cuenta_como_del_programador():
+    hoy = {"SALIDA SEMANA (L-V)": {"ejecutado": True, "hora": "2026-10-26T17:00:05"}}
+    assert em.marcajes_sin_confirmar(hoy, [], "e1") == [("SALIDA SEMANA (L-V)", "Salida")]
+
+
+def _estado_con(entrada):
+    return {"empleados": [{"nombre": "Ana", "entrada": entrada, "salida": {"estado": "pendiente", "programada": "17:00:10"}}]}
+
+
+def test_bloquea_reiniciar_justo_antes_y_durante_la_gracia_de_un_marcaje():
+    ahora = datetime(2026, 10, 26, 8, 0, 0)
+    for programada in ("08:01:00", "07:58:30"):  # faltan 60 s / pasaron 90 s sin registrarse
+        assert "Ana" in em.bloqueo_por_marcaje(_estado_con({"estado": "pendiente", "programada": programada}), ahora)
+
+
+def test_no_bloquea_lejos_de_un_marcaje_ni_cuando_ya_vencio():
+    ahora = datetime(2026, 10, 26, 8, 0, 0)
+    assert em.bloqueo_por_marcaje(_estado_con({"estado": "pendiente", "programada": "09:00:00"}), ahora) is None
+    assert em.bloqueo_por_marcaje(_estado_con({"estado": "pendiente", "programada": "07:50:00"}), ahora) is None
+    assert em.bloqueo_por_marcaje(_estado_con({"estado": "vencida", "programada": "07:50:00"}), ahora) is None
+
+
+def test_bloquea_mientras_se_espera_la_confirmacion():
+    ahora = datetime(2026, 10, 26, 8, 0, 0)
+    e = {"estado": "marcada", "programada": "07:59:00", "detalle": "esperando confirmación del portal…"}
+    assert "confirmando" in em.bloqueo_por_marcaje(_estado_con(e), ahora)
+    e["detalle"] = "sin confirmación independiente"  # ya pasó la ventana: no bloquea
+    assert em.bloqueo_por_marcaje(_estado_con(e), ahora) is None
+
+
+def test_bloqueo_tolera_estado_con_error():
+    assert em.bloqueo_por_marcaje({"error": "x"}, datetime(2026, 10, 26, 8, 0, 0)) is None

@@ -162,12 +162,18 @@ if errorlevel 1 (
     echo       OK
 )
 
-echo [4/5] Iniciando el programador en una ventana nueva (navegador visible)...
-REM Igual que antes: ventana de consola propia, con el navegador visible en tu sesion.
-REM No se crea ni se modifica ninguna Tarea Programada.
-start "Programador GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" src\programador.py"
-REM Monitor web (solo lectura) en su propia ventana, sin abrir el navegador: http://127.0.0.1:8765
-start "Monitor GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" scripts\monitor.py"
+REM Modo oculto: si existe config\modo_oculto.flag se arranca sin ventanas y con el navegador headless
+REM (scripts\iniciar_oculto.bat). Se activa con scripts\activar_modo_oculto.bat. Sin el archivo, todo igual que antes.
+if exist "%TARGET%\config\modo_oculto.flag" (
+    echo [4/5] Iniciando programador y monitor OCULTOS ^(modo oculto activado^)...
+    call "%TARGET%\scripts\iniciar_oculto.bat" nopause
+) else (
+    echo [4/5] Iniciando el programador en una ventana nueva ^(navegador visible^)...
+    REM Ventana de consola propia, con el navegador visible en tu sesion. No se crea ninguna Tarea Programada.
+    start "Programador GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" src\programador.py"
+    REM Monitor web en su propia ventana, sin abrir el navegador: http://127.0.0.1:8765
+    start "Monitor GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" scripts\monitor.py"
+)
 ping -n 8 127.0.0.1 >nul
 
 echo [5/5] Verificando...
@@ -179,8 +185,12 @@ echo ================================================
 echo   ACTUALIZACION COMPLETADA
 echo ================================================
 echo.
-echo Deja abiertas las ventanas "Programador GeoVictoria" y "Monitor GeoVictoria" (puedes minimizarlas, no cerrarlas).
-echo Monitor en vivo: http://127.0.0.1:8765
+if exist "%TARGET%\config\modo_oculto.flag" (
+    echo Modo oculto: no hay ventanas. Todo se ve y se controla en http://127.0.0.1:8765
+) else (
+    echo Deja abiertas las ventanas "Programador GeoVictoria" y "Monitor GeoVictoria" ^(puedes minimizarlas, no cerrarlas^).
+    echo Monitor en vivo ^(con botones para reiniciar/detener^): http://127.0.0.1:8765
+)
 echo Verifica con: %TARGET%\scripts\ver_estado.bat
 echo.
 pause

@@ -38,7 +38,7 @@ echo.
 :: Verificar entorno virtual
 echo [3/7] Verificando entorno virtual...
 if exist .venv\ (
-    echo    ✅ Entorno virtual existe (.venv)
+    echo    ✅ Entorno virtual existe ^(.venv^)
 ) else (
     echo    ❌ Entorno virtual NO existe
     echo       Ejecute: python -m venv .venv

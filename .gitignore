@@ -29,6 +29,7 @@ env/
 # Credenciales y configuración sensible
 .env
 config/employees.json
+config/modo_oculto.flag
 
 # Claude Code — configuración local del desarrollador
 .claude/settings.local.json

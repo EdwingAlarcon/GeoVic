@@ -84,15 +84,21 @@ def test_con_token_rechaza_sin_el_y_acepta_con_el(monitor_mod, empleados_json):
         srv.shutdown()
 
 
-def test_es_de_solo_lectura(monitor_mod, empleados_json):
+def test_solo_hay_una_ruta_que_actua(monitor_mod, empleados_json):
+    """Todo es lectura salvo POST /api/accion (protegida): cualquier otro método o ruta no modifica nada."""
     srv = _servidor(monitor_mod, empleados_json)
     try:
-        for metodo in ("POST", "PUT", "DELETE"):
+        for metodo in ("PUT", "DELETE", "PATCH"):
             c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
             c.request(metodo, "/api/estado", body="x")
             r = c.getresponse()
             r.read()
-            assert r.status in (405, 501)  # sin do_POST/do_PUT/do_DELETE: no hay forma de modificar nada
+            assert r.status in (405, 501)  # sin do_PUT/do_DELETE/do_PATCH
+        c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+        c.request("POST", "/api/estado", body="x")
+        r = c.getresponse()
+        r.read()
+        assert r.status == 404  # POST solo existe en /api/accion
         assert _get(srv, "/otra-cosa")[0] == 404
     finally:
         srv.shutdown()
@@ -179,5 +185,109 @@ def test_log_exige_token_si_hay_token(monitor_mod, empleados_json):
     try:
         assert _get(srv, "/api/log?f=programador")[0] == 401
         assert _get(srv, "/api/log?f=programador&t=CLAVE")[0] == 200
+    finally:
+        srv.shutdown()
+
+
+# --- Botones de control: POST /api/accion --------------------------------------
+
+def _post(srv, cuerpo, cabeceras=None, camino="/api/accion"):
+    c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+    c.request("POST", camino, body=json.dumps(cuerpo), headers={"Content-Type": "application/json", **(cabeceras or {})})
+    r = c.getresponse()
+    return r.status, json.loads(r.read().decode("utf-8"))
+
+
+OK = {"X-GeoVic-Accion": "1"}
+
+
+@pytest.fixture
+def control(monitor_mod, empleados_json, monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(monitor_mod, "ejecutar_accion", lambda accion, raiz=None: llamadas.append(accion) or f"hecho {accion}")
+    monkeypatch.setattr(monitor_mod.estado_monitor, "bloqueo_por_marcaje", lambda estado, ahora: None)
+    srv = _servidor(monitor_mod, empleados_json)
+    yield srv, llamadas
+    srv.shutdown()
+
+
+def test_accion_ejecuta_y_queda_en_la_bitacora(control):
+    srv, llamadas = control
+    estado, cuerpo = _post(srv, {"accion": "reiniciar"}, OK)
+    assert (estado, cuerpo["ok"]) == (200, True) and llamadas == ["reiniciar"]
+    assert any(e["tipo"] == "control" and e["accion"] == "reiniciar" and e["ok"] for e in bitacora.leer_eventos())
+
+
+def test_accion_exige_la_cabecera_propia_y_rechaza_otro_origen(control):
+    srv, llamadas = control
+    assert _post(srv, {"accion": "reiniciar"})[0] == 403  # sin cabecera (p. ej. un formulario ajeno)
+    assert _post(srv, {"accion": "reiniciar"}, {**OK, "Origin": "http://malo.example"})[0] == 403
+    assert llamadas == []
+
+
+def test_accion_valida_el_cuerpo(control):
+    srv, llamadas = control
+    assert _post(srv, {"accion": "borrar_todo"}, OK)[0] == 400
+    assert _post(srv, {}, OK)[0] == 400
+    assert _post(srv, {"accion": "reiniciar"}, OK, camino="/api/otra")[0] == 404
+    assert llamadas == []
+
+
+def test_accion_bloqueada_por_un_marcaje_exige_forzar(monitor_mod, empleados_json, monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(monitor_mod, "ejecutar_accion", lambda accion, raiz=None: llamadas.append(accion) or "ok")
+    monkeypatch.setattr(monitor_mod.estado_monitor, "bloqueo_por_marcaje", lambda estado, ahora: "Ana: su entrada está programada")
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        estado, cuerpo = _post(srv, {"accion": "reiniciar"}, OK)
+        assert estado == 409 and cuerpo["bloqueado"] and llamadas == []
+        assert _post(srv, {"accion": "reiniciar", "forzar": True}, OK)[0] == 200 and llamadas == ["reiniciar"]
+        assert any(e["tipo"] == "control" and e["forzado"] for e in bitacora.leer_eventos())
+        llamadas.clear()
+        assert _post(srv, {"accion": "iniciar"}, OK)[0] == 200  # iniciar nunca se bloquea
+    finally:
+        srv.shutdown()
+
+
+def test_accion_exige_token_y_un_fallo_se_informa(monitor_mod, empleados_json, monkeypatch):
+    def falla(accion, raiz=None):
+        raise RuntimeError("no arrancó")
+
+    monkeypatch.setattr(monitor_mod, "ejecutar_accion", falla)
+    monkeypatch.setattr(monitor_mod.estado_monitor, "bloqueo_por_marcaje", lambda estado, ahora: None)
+    srv = _servidor(monitor_mod, empleados_json, token="CLAVE")
+    try:
+        assert _post(srv, {"accion": "reiniciar"}, OK)[0] == 401
+        estado, cuerpo = _post(srv, {"accion": "reiniciar"}, OK, camino="/api/accion?t=CLAVE")
+        assert estado == 500 and "no arrancó" in cuerpo["mensaje"]
+        assert any(e["tipo"] == "control" and e["ok"] is False for e in bitacora.leer_eventos())
+    finally:
+        srv.shutdown()
+
+
+def test_ejecutar_accion_reiniciar_detiene_inicia_y_espera(monitor_mod, monkeypatch):
+    pasos = []
+    cp = monitor_mod.control_programador
+    monkeypatch.setattr(cp, "detener", lambda: pasos.append("detener") or 2)
+    monkeypatch.setattr(cp, "procesos_programador", lambda: [])
+    monkeypatch.setattr(cp, "iniciar", lambda raiz: pasos.append("iniciar") or 1)
+    monkeypatch.setattr(cp, "esperar_arranque", lambda: True)
+    assert "reiniciado" in monitor_mod.ejecutar_accion("reiniciar") and pasos == ["detener", "iniciar"]
+
+    monkeypatch.setattr(cp, "esperar_arranque", lambda: False)
+    with pytest.raises(RuntimeError):
+        monitor_mod.ejecutar_accion("reiniciar")
+
+    monkeypatch.setattr(cp, "procesos_programador", lambda: [object()])
+    with pytest.raises(RuntimeError, match="Ya hay"):
+        monitor_mod.ejecutar_accion("iniciar")
+
+
+def test_control_informa_si_se_permite_y_el_bloqueo(monitor_mod, empleados_json, monkeypatch):
+    monkeypatch.setattr(monitor_mod.estado_monitor, "bloqueo_por_marcaje", lambda estado, ahora: "Ana: algo")
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        estado, cuerpo = _get(srv, "/api/control")
+        assert estado == 200 and json.loads(cuerpo) == {"permitido": True, "bloqueo": "Ana: algo"}
     finally:
         srv.shutdown()

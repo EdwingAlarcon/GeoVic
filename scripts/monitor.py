@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Monitor web de solo lectura del programador de GeoVictoria.
+Monitor web del programador de GeoVictoria: lectura, más botones para iniciar, detener y reiniciar
+el programador (solo desde el propio servidor y nunca en mitad de un marcaje sin confirmación).
 
 Uso:
   python scripts/monitor.py                                  # http://127.0.0.1:8765, solo este equipo
@@ -8,7 +9,7 @@ Uso:
   python scripts/monitor.py --host 0.0.0.0 --token CLAVE     # accesible por la red, protegido por token
                                                              # (entra con http://SERVIDOR:8765/?t=CLAVE)
 
-Solo LEE archivos (registros, bitácora, latido, alertas): no abre el portal, no modifica nada y no
+Solo LEE archivos (registros, bitácora, latido, alertas): no abre el portal, no modifica datos y no
 envía usuarios ni contraseñas (los empleados se reducen a id, nombre, activo y horario). Las alertas
 son locales: banda roja, título de la pestaña y, si lo activas, un sonido en esta página.
 """
@@ -26,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import bitacora
+from src import bitacora, control_programador
 from src.control_concurrencia import desactivar_seleccion_consola
 from src import diagnostico_login as dl
 from src import estado_monitor
@@ -145,6 +146,27 @@ def leer_log(nombre: str, cuantas: int = 150, ruta_empleados: Optional[Path] = N
     return {"archivo": ruta.name, "lineas": estado_monitor.ultimas_lineas_censuradas(texto, cuantas, _secretos(ruta_empleados))}
 
 
+# --- Control del programador (única parte que actúa; nunca toca el portal) ----------
+
+RAIZ = Path(__file__).resolve().parent.parent
+ACCIONES = ("iniciar", "detener", "reiniciar")
+_LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+
+def ejecutar_accion(accion: str, raiz: Path = RAIZ) -> str:
+    """Inicia, detiene o reinicia el programador y devuelve un mensaje. Lanza RuntimeError si falla."""
+    if accion in ("detener", "reiniciar"):
+        cerrados = control_programador.detener()
+    if accion == "detener":
+        return f"Programador detenido ({cerrados} proceso(s))." if cerrados else "No había ningún programador en ejecución."
+    if accion == "iniciar" and control_programador.procesos_programador():
+        raise RuntimeError("Ya hay un programador en ejecución.")
+    control_programador.iniciar(raiz)
+    if not control_programador.esperar_arranque():
+        raise RuntimeError("El programador no aparece tras arrancarlo: revisa el log del programador.")
+    return "Programador reiniciado." if accion == "reiniciar" else "Programador iniciado."
+
+
 # --- Servidor ------------------------------------------------------------------
 
 class Monitor(ThreadingHTTPServer):
@@ -154,16 +176,26 @@ class Monitor(ThreadingHTTPServer):
         super().__init__(direccion, Manejador)
         self.token = token
         self.ruta_empleados = ruta_empleados
-        self._cache: Dict = {"t": 0.0, "cuerpo": b""}
+        self.raiz = RAIZ
+        self._cache: Dict = {"t": 0.0, "dato": {}, "cuerpo": b""}
         self._candado = threading.Lock()
+        self.accion_en_curso = threading.Lock()  # una sola acción de control a la vez
 
-    def estado_json(self) -> bytes:
-        """Una lectura cada 2 s como máximo, aunque haya varias pestañas abiertas."""
+    def estado(self):
+        """(dict, json) del estado. Una lectura cada 2 s como máximo, aunque haya varias pestañas abiertas."""
         with self._candado:
             if time.monotonic() - self._cache["t"] > 2:
-                self._cache["cuerpo"] = json.dumps(leer_estado(self.ruta_empleados), ensure_ascii=False).encode("utf-8")
-                self._cache["t"] = time.monotonic()
-            return self._cache["cuerpo"]
+                dato = leer_estado(self.ruta_empleados)
+                self._cache.update(dato=dato, cuerpo=json.dumps(dato, ensure_ascii=False).encode("utf-8"),
+                                   t=time.monotonic())
+            return self._cache["dato"], self._cache["cuerpo"]
+
+    def estado_json(self) -> bytes:
+        return self.estado()[1]
+
+    def invalidar_estado(self) -> None:
+        with self._candado:
+            self._cache["t"] = 0.0
 
 
 class Manejador(BaseHTTPRequestHandler):
@@ -188,6 +220,54 @@ class Manejador(BaseHTTPRequestHandler):
         enviado = (consulta.get("t") or [self.headers.get("X-Token", "")])[0]
         return enviado == self.server.token
 
+    def _es_local(self) -> bool:
+        return self.client_address[0] in _LOOPBACK
+
+    def _json(self, codigo: int, cuerpo: Dict) -> None:
+        self._responder(codigo, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+
+    def do_POST(self):
+        """Única ruta que actúa: /api/accion. Solo desde este equipo, con token si lo hay, con cabecera
+        propia (un formulario de otra web no puede enviarla) y sin reiniciar a mitad de un marcaje."""
+        url = urlparse(self.path)
+        if url.path != "/api/accion":
+            return self._json(404, {"ok": False, "mensaje": "No encontrado"})
+        if not self._es_local():
+            return self._json(403, {"ok": False, "mensaje": "Las acciones solo se permiten desde el propio servidor."})
+        if not self._autorizado(parse_qs(url.query)):
+            return self._json(401, {"ok": False, "mensaje": "Falta el token."})
+        origen = self.headers.get("Origin")
+        if self.headers.get("X-GeoVic-Accion") != "1" or (origen and urlparse(origen).netloc != self.headers.get("Host")):
+            return self._json(403, {"ok": False, "mensaje": "Petición no válida."})
+        try:
+            largo = int(self.headers.get("Content-Length") or 0)
+            datos = json.loads(self.rfile.read(min(largo, 1024)) or b"{}")
+            accion, forzar = datos.get("accion"), bool(datos.get("forzar"))
+        except (ValueError, AttributeError):
+            return self._json(400, {"ok": False, "mensaje": "Cuerpo no válido."})
+        if accion not in ACCIONES:
+            return self._json(400, {"ok": False, "mensaje": "Acción desconocida."})
+
+        if not self.server.accion_en_curso.acquire(blocking=False):
+            return self._json(409, {"ok": False, "mensaje": "Ya hay una acción en curso."})
+        try:
+            estado, _ = self.server.estado()
+            bloqueo = None if accion == "iniciar" else estado_monitor.bloqueo_por_marcaje(estado, datetime.now())
+            if bloqueo and not forzar:
+                return self._json(409, {"ok": False, "bloqueado": bloqueo,
+                                        "mensaje": f"Hay un marcaje en curso o a punto de ejecutarse ({bloqueo})."})
+            try:
+                mensaje = ejecutar_accion(accion, self.server.raiz)
+                bitacora.registrar("control", accion=accion, forzado=bool(bloqueo), ok=True)
+                resultado = (200, {"ok": True, "mensaje": mensaje})
+            except Exception as e:
+                bitacora.registrar("control", accion=accion, forzado=bool(bloqueo), ok=False, error=str(e))
+                resultado = (500, {"ok": False, "mensaje": str(e)})
+            self.server.invalidar_estado()
+            return self._json(*resultado)
+        finally:
+            self.server.accion_en_curso.release()
+
     def do_GET(self):
         url = urlparse(self.path)
         if not self._autorizado(parse_qs(url.query)):
@@ -196,6 +276,10 @@ class Manejador(BaseHTTPRequestHandler):
             self._responder(200, PAGINA.encode("utf-8"))
         elif url.path == "/api/estado":
             self._responder(200, self.server.estado_json(), "application/json; charset=utf-8")
+        elif url.path == "/api/control":
+            estado, _ = self.server.estado()
+            cuerpo = {"permitido": self._es_local(), "bloqueo": estado_monitor.bloqueo_por_marcaje(estado, datetime.now())}
+            self._responder(200, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         elif url.path == "/api/log":
             consulta = parse_qs(url.query)
             try:
@@ -232,13 +316,17 @@ td{padding:8px;border-bottom:1px solid var(--bd);vertical-align:top}tr:last-chil
 .f-crit td:first-child{box-shadow:inset 4px 0 0 var(--cr)}.dup{color:var(--av);font-weight:700}
 ul.act{list-style:none;margin:0;padding:0;max-height:330px;overflow:auto}ul.act li{padding:4px 0;border-bottom:1px solid var(--bd);display:flex;gap:10px;font-size:13.5px}
 ul.act .h{color:var(--mut);min-width:62px}ul.act .n{min-width:150px;font-weight:600}.error{color:var(--cr)}.aviso{color:var(--av)}
+[hidden]{display:none!important}
 pre.log{margin:0;max-height:380px;overflow:auto;font:12.5px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px}
 pre.log .e{color:var(--cr);font-weight:600}pre.log .w{color:var(--av)}summary{cursor:pointer}
 button{font:inherit;padding:5px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
 </style></head><body>
 <header id="cab" class="ok"><h1 id="titulo">Cargando…</h1><div class="sub" id="sub"></div><ul class="msgs" id="msgs"></ul></header>
 <main>
- <section class="card"><h2>Programador</h2><div class="grid" id="prog"></div></section>
+ <section class="card"><h2>Programador</h2><div class="grid" id="prog"></div>
+  <div id="ctl" hidden style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+   <button id="b-reiniciar">↻ Reiniciar</button><button id="b-detener">■ Detener</button><button id="b-iniciar">▶ Iniciar</button>
+   <span class="small" id="ctlmsg"></span></div></section>
  <section class="card"><h2>Resumen del día</h2><div id="resumen"></div></section>
  <section class="card"><h2>Empleados</h2><div class="wrap"><table><thead><tr><th>Empleado</th><th>Entrada</th><th>Salida</th><th>Último login</th></tr></thead><tbody id="filas"></tbody></table></div></section>
  <section class="card"><h2>Actividad reciente</h2><ul class="act" id="act"></ul></section>
@@ -246,7 +334,7 @@ button{font:inherit;padding:5px 12px;border-radius:8px;border:1px solid var(--bd
   <div class="small" style="margin:8px 0"><select id="logsel"><option value="programador">programador</option><option value="geovictoria">geovictoria (navegador)</option></select>
    <label><input type="checkbox" id="logsolo"> solo avisos y errores</label> <span id="logarch"></span></div>
   <pre id="logtxt" class="log">Abre este panel para ver el log.</pre></details></section>
- <div class="small">Solo lectura · se actualiza cada 5 s · <span id="ult"></span> · <button id="snd">🔔 Sonido: apagado</button></div>
+ <div class="small">Solo lectura (salvo los botones del programador, solo desde este equipo) · se actualiza cada 5 s · <span id="ult"></span> · <button id="snd">🔔 Sonido: apagado</button></div>
 </main>
 <script>
 const Q = new URLSearchParams(location.search), T = Q.get("t");
@@ -315,6 +403,29 @@ async function ciclo(){
   try { const r = await fetch(URL_API, {cache:"no-store"}); if (r.status === 401) { document.getElementById("titulo").textContent = "Falta el token en la URL (?t=…)"; return; } pintar(await r.json()); }
   catch(e){ document.getElementById("titulo").textContent = "Sin conexión con el monitor"; document.getElementById("cab").className = "critico"; }
 }
+const TXT = {reiniciar:"reiniciar", detener:"DETENER (no marcará nada hasta que lo inicies)", iniciar:"iniciar"};
+async function accion(nombre, forzar){
+  const msg = document.getElementById("ctlmsg"), botones = [...document.querySelectorAll("#ctl button")];
+  botones.forEach(b => b.disabled = true); msg.textContent = "Trabajando… (puede tardar unos segundos)";
+  try {
+    const r = await fetch("/api/accion" + (T ? "?t=" + encodeURIComponent(T) : ""), {method:"POST",
+      headers:{"Content-Type":"application/json","X-GeoVic-Accion":"1"}, body: JSON.stringify({accion:nombre, forzar:!!forzar})});
+    const d = await r.json();
+    if (r.status === 409 && d.bloqueado && !forzar) {
+      msg.textContent = "";
+      if (confirm(d.mensaje + "\n\nReiniciar ahora puede dejar ese marcaje a medias o sin confirmar.\n¿Hacerlo de todos modos?")) return accion(nombre, true);
+    } else msg.textContent = (d.ok ? "✔ " : "✖ ") + d.mensaje;
+  } catch(e){ msg.textContent = "✖ No se pudo contactar con el monitor."; }
+  botones.forEach(b => b.disabled = false); ciclo();
+}
+for (const n of ["reiniciar","detener","iniciar"]) document.getElementById("b-"+n).onclick = () => { if (confirm("¿Seguro que quieres " + TXT[n] + " el programador?")) accion(n, false); };
+async function cicloControl(){
+  try {
+    const r = await fetch("/api/control" + (T ? "?t=" + encodeURIComponent(T) : ""), {cache:"no-store"}); const d = await r.json();
+    const caja = document.getElementById("ctl"); caja.hidden = !d.permitido;
+    ["reiniciar","detener"].forEach(n => document.getElementById("b-"+n).title = d.bloqueo ? "Ahora no conviene: " + d.bloqueo : "");
+  } catch(e){}
+}
 async function cicloLog(){
   const caja = document.getElementById("logbox"); if (!caja.open) return;
   const pre = document.getElementById("logtxt");
@@ -334,7 +445,7 @@ async function cicloLog(){
 }
 document.getElementById("logbox").addEventListener("toggle", cicloLog);
 document.getElementById("logsel").onchange = cicloLog; document.getElementById("logsolo").onchange = cicloLog;
-ciclo(); setInterval(ciclo, 5000); setInterval(cicloLog, 5000);
+ciclo(); setInterval(ciclo, 5000); setInterval(cicloLog, 5000); cicloControl(); setInterval(cicloControl, 5000);
 </script></body></html>
 """
 

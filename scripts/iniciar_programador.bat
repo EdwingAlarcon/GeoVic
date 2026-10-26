@@ -11,7 +11,7 @@ cd /d "%~dp0\.."
 REM --- Detectar Python: venv si existe, sino sistema ---
 if exist ".venv\Scripts\python.exe" (
     set PYTHON=.venv\Scripts\python.exe
-    echo [OK] Usando Python del entorno virtual (.venv)
+    echo [OK] Usando Python del entorno virtual ^(.venv^)
 ) else (
     set PYTHON=python
     echo [WARN] Entorno virtual no encontrado, usando Python del sistema

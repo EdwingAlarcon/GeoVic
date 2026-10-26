@@ -13,7 +13,7 @@ cd /d "%~dp0\.."
 REM --- Detectar Python: venv si existe, sino sistema ---
 if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
-    echo [OK] Usando Python del entorno virtual (.venv)
+    echo [OK] Usando Python del entorno virtual ^(.venv^)
 ) else (
     set "PYTHON=python"
     echo [WARN] Entorno virtual no encontrado, usando Python del sistema
@@ -27,7 +27,7 @@ if errorlevel 1 (
     echo [ERROR] No se pudo detener el programador anterior. No se inicia uno nuevo:
     echo         saldria con "ya en ejecucion" y seguiria el viejo con la configuracion antigua.
     echo.
-    pause
+    if /I not "%~1"=="nopause" pause
     exit /b 1
 )
 
@@ -44,4 +44,4 @@ echo   PROGRAMADOR REINICIADO
 echo   Deja abierta la ventana "Programador GeoVictoria"
 echo   (puedes minimizarla, no cerrarla)
 echo ============================================
-pause
+if /I not "%~1"=="nopause" pause

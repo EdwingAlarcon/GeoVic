@@ -13,7 +13,7 @@ Estados de un marcaje (entrada o salida) de un empleado:
 """
 import re
 from datetime import datetime, time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from src.empleados import _HORARIO_DEFAULT, obtener_horario_dia
 
@@ -291,3 +291,50 @@ def ultimas_lineas_censuradas(texto: str, cuantas: int, secretos: List[str]) -> 
     """Las últimas `cuantas` líneas no vacías de `texto`, ya censuradas."""
     lineas = [l.rstrip("\r") for l in texto.split("\n") if l.strip()]
     return [censurar_linea(l, secretos) for l in lineas[-max(cuantas, 0):]] if cuantas else []
+
+
+def marcajes_sin_confirmar(registro_hoy: Optional[Dict], eventos: List[Dict], emp_id: str) -> List[Tuple[str, str]]:
+    """Marcajes de hoy hechos por el programador que aún no tienen confirmación del portal.
+
+    Devuelve (tipo_marcaje, accion). Sirve para reconciliar tras un reinicio: la confirmación
+    independiente es un job en memoria y se pierde si el programador se reinicia (o si el marcaje
+    lo hizo una versión anterior). Se omiten los detectados en el portal y los que ya tienen una
+    confirmación concluyente (True o False: un False ya generó su alerta).
+    """
+    pendientes: List[Tuple[str, str]] = []
+    for tipo, marca in (registro_hoy or {}).items():
+        if not isinstance(marca, dict) or not marca.get("ejecutado") or marca.get("origen") == "portal":
+            continue
+        accion = "Entrada" if "ENTRADA" in tipo.upper() else "Salida"
+        resultados = [e.get("confirmada") for e in eventos
+                      if e.get("tipo") == "confirmacion" and e.get("emp_id") == emp_id and e.get("accion") == accion]
+        if resultados and resultados[-1] is not None:
+            continue
+        pendientes.append((tipo, accion))
+    return pendientes
+
+
+_ANTES_SEG = 120      # un marcaje programado en los próximos 2 min bloquea el reinicio
+_DESPUES_SEG = GRACIA_SEG  # y hasta que venza su gracia: puede estar ejecutándose o esperando navegador
+
+
+def bloqueo_por_marcaje(estado: Dict, ahora: datetime) -> Optional[str]:
+    """Motivo por el que NO conviene reiniciar o detener el programador ahora, o None si se puede.
+
+    Un reinicio a mitad de un marcaje lo deja a medias, y uno recién hecho pierde su confirmación
+    independiente (job en memoria). Se bloquea si hay un marcaje a punto de ejecutarse, en curso o
+    esperando su confirmación.
+    """
+    for fila in estado.get("empleados", []):
+        for accion in ("entrada", "salida"):
+            a = fila.get(accion) or {}
+            if a.get("estado") == "pendiente":
+                hora = _hms(a.get("programada"))
+                if hora is None:
+                    continue
+                falta = (datetime.combine(ahora.date(), hora) - ahora).total_seconds()
+                if -_DESPUES_SEG <= falta <= _ANTES_SEG:
+                    return f"{fila.get('nombre')}: su {accion} está programada a las {a['programada']}"
+            elif a.get("estado") == "marcada" and str(a.get("detalle", "")).startswith("esperando"):
+                return f"{fila.get('nombre')}: se está confirmando su {accion} en el portal"
+    return None

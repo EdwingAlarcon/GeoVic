@@ -27,7 +27,7 @@ from src import bitacora
 from src.cache_estado import get_cache
 from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica, desactivar_seleccion_consola
 from src.empleados import cargar_empleados, obtener_horario_dia
-from src.estado_monitor import confirmacion_de
+from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import run, verificar_estado
 
@@ -714,6 +714,31 @@ def _preparar_scheduler(scheduler: BlockingScheduler) -> None:
         _programar_confirmacion(empleado, tipo, accion, demora=min(demora, 30), intento=intento)
 
 
+def _reconciliar_confirmaciones(empleados: List[Dict]) -> int:
+    """Agenda la confirmación de los marcajes de hoy que no llegaron a confirmarse.
+
+    La confirmación es un job en memoria: si el programador se reinicia entre el marcaje y su
+    confirmación (o el marcaje lo hizo una versión anterior), nadie la verificaría. Se escalonan 10 s
+    para no abrir todos los navegadores a la vez. Nunca repite el marcaje, solo lo comprueba.
+    """
+    if not CONFIRMAR:
+        return 0
+    eventos = bitacora.leer_eventos()
+    hoy = date.today().isoformat()
+    agendadas = 0
+    for emp in empleados:
+        try:
+            registro_hoy = leer_registro(emp["id"]).get(hoy, {})
+            for tipo, accion in marcajes_sin_confirmar(registro_hoy, eventos, emp["id"]):
+                _programar_confirmacion(emp, tipo, accion, demora=30 + 10 * agendadas)
+                agendadas += 1
+        except Exception as e:
+            logger.warning(f"[{emp.get('nombre', emp.get('id'))}] No se pudo reconciliar confirmaciones: {e}")
+    if agendadas:
+        logger.info(f"🔎 {agendadas} marcaje(s) de hoy sin confirmar: se verificarán en el portal")
+    return agendadas
+
+
 def _marcar_fase_activa() -> None:
     global _FASE
     _FASE = "activo"
@@ -788,6 +813,7 @@ def main() -> None:
     )
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     _preparar_scheduler(scheduler)
+    _reconciliar_confirmaciones(empleados)
 
     for idx, emp in enumerate(empleados):
         try:
