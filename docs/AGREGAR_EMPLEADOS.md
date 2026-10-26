@@ -211,8 +211,7 @@ Este script se encarga de todo: detiene la instancia actual, limpia el lock file
 ### Opción B — Reinicio manual
 
 1. Cierra la ventana del programador (o presiona `Ctrl+C` en ella)
-2. Borra el lock file si quedó: `src/logs/programador.lock`
-3. Ejecuta: `scripts\iniciar_programador_vigilado.bat` (o `iniciar_programador.bat`)
+2. Ejecuta: `scripts\iniciar_programador.bat` (un `programador.lock` viejo no estorba: la instancia única la garantiza el sistema operativo)
 
 > **¿Y los marcajes de hoy de los empleados existentes?**  
 > No se pierden. Al arrancar, el programador verifica el estado de cada empleado en el portal y sincroniza su registro local. Si ya marcaron entrada, lo detecta y no lo marca de nuevo.

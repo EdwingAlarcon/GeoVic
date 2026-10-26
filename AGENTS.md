@@ -35,10 +35,13 @@ pytest tests/test_empleados.py
 ```
 
 **Windows convenience scripts** (in `scripts/`):
-- `iniciar_programador.bat` — start the scheduler
+- `iniciar_programador.bat` — start the scheduler (window "Programador GeoVictoria")
+- `reiniciar_programador.bat` / `detener_programador.bat` — restart / stop it; they kill only `programador.py` processes, never other Python
 - `ejecutar_manual.bat` — one-off marking
 - `ver_estado.bat` — show current scheduler state (calls `scripts/verificar_estado.py`)
-- `corregir_problema_completo.bat` — stop all instances, clean corrupt registry, re-diagnose
+- `diagnostico_sistema.bat` — scheduler instances, lock, registry, recent logs and today's alerts per user
+- `ver_log_en_vivo.bat` — follow the scheduler log live
+- `actualizar_servidor.bat` (project root) — update an installed server from the extracted zip
 
 ## Architecture
 

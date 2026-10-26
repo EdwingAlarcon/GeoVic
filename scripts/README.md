@@ -1,91 +1,40 @@
-# 🚀 Guía Rápida - Corrección de Marcajes Duplicados
+# Scripts de GeoVic (Windows)
 
-## 📋 Opción 1: Corrección Automática (Recomendado)
+Doble clic en el `.bat` que necesites. Todos usan el Python del entorno virtual (`.venv`) si existe.
 
-Ejecuta **UN SOLO** archivo para corregir todo automáticamente:
+## Uso diario
 
-### Desde el Explorador de Windows:
-1. Abre la carpeta `scripts` en el explorador de archivos
-2. Haz **doble clic** en: `corregir_problema_completo.bat`
-3. Sigue las instrucciones en pantalla
+| Script | Para qué sirve |
+|---|---|
+| `iniciar_programador.bat` | Inicia el programador en una ventana "Programador GeoVictoria" (déjala abierta; puedes minimizarla) |
+| `reiniciar_programador.bat` | Lo detiene y lo vuelve a iniciar. Úsalo tras editar `config\employees.json` o `config\festivos_adicionales.json`: el programador solo lee esos archivos al arrancar |
+| `detener_programador.bat` | Lo detiene matando solo los procesos de `programador.py` (no toca otros Python) |
+| `ver_estado.bat` | Muestra qué marcajes se registraron hoy |
+| `ver_log_en_vivo.bat` | Sigue el log del programador en tiempo real |
+| `diagnostico_sistema.bat` | Instancias del programador, lock, registro, logs recientes y **alertas de hoy por usuario** |
 
-Este script ejecutará automáticamente:
-- ✅ Instalación de dependencias
-- ✅ Detener todas las instancias
-- ✅ Limpiar registro corrupto
-- ✅ Diagnóstico del sistema
+## Marcaje manual y recuperación
 
----
+| Script | Para qué sirve |
+|---|---|
+| `ejecutar_manual.bat` | Un marcaje manual |
+| `marcar_salida_ahora.bat` | Marca la salida de todos los empleados (recupera una salida perdida) |
+| `limpiar_registro_hoy.bat` | Borra el registro de hoy. ⚠️ Permite volver a marcar: úsalo solo si el registro quedó con datos incorrectos |
 
-## 📋 Opción 2: Paso a Paso Manual
+## Instalación y utilidades
 
-Si prefieres ejecutar cada paso manualmente, haz doble clic en cada archivo en orden:
+| Script | Para qué sirve |
+|---|---|
+| `verificar_instalacion.bat` | Comprueba Python, dependencias y estructura tras instalar |
+| `ver_festivos.bat` | Festivos de Colombia del año |
+| `eliminar_tarea_programada.bat` | Quita la Tarea Programada "GeoVictoria Programador" si quedó de una versión anterior |
 
-### 1. Instalar dependencias
-📄 `instalar_psutil.bat`
+En la raíz del proyecto: `setup.bat` (primera instalación), `actualizar_servidor.bat` (actualizar desde el zip) y `exportar_proyecto.bat` (generar el zip).
 
-### 2. Detener instancias duplicadas
-📄 `detener_todas_instancias.bat`
+## Una sola instancia
 
-### 3. Limpiar registro de hoy
-📄 `limpiar_registro_hoy.bat`
+El programador impide por sí mismo que corran dos a la vez (exclusión del sistema operativo): un segundo arranque sale con "Programador ya en ejecución". Un `programador.lock` viejo no estorba.
 
-### 4. Diagnóstico del sistema
-📄 `diagnostico_sistema.bat`
+## Si Windows no deja ejecutar un `.bat`
 
-### 5. Iniciar el programador
-📄 `iniciar_programador.bat`
-
----
-
-## 🔍 Verificar Estado
-
-Después de la corrección, verifica que todo esté OK:
-
-📄 `ver_estado.bat` - Estado general
-
----
-
-## 📁 Ubicación de los Scripts
-
-Todos los scripts están en la carpeta:
-```
-GeoVic/scripts/
-```
-
-Para abrirla desde Visual Studio Code:
-1. Haz clic derecho en cualquier archivo
-2. Selecciona **"Revelar en el Explorador de archivos"**
-3. Navega a la carpeta `scripts`
-
----
-
-## ❓ Si los Scripts No Funcionan
-
-### Windows no permite ejecutar .bat
-1. Haz clic derecho en el archivo
-2. Selecciona "Propiedades"
-3. Haz clic en "Desbloquear"
-4. Haz clic en "Aceptar"
-
-### Aparece "No se reconoce python"
-Ejecuta primero: `instalar_dependencias.bat`
-
----
-
-## 📞 Scripts Disponibles
-
-| Script | Descripción |
-|--------|-------------|
-| `corregir_problema_completo.bat` | ⭐ Corrección automática completa |
-| `instalar_dependencias.bat` | Instala todas las dependencias |
-| `instalar_psutil.bat` | Instala solo psutil |
-| `detener_todas_instancias.bat` | Detiene todos los programadores |
-| `limpiar_registro_hoy.bat` | Limpia registro corrupto |
-| `diagnostico_sistema.bat` | Diagnóstico completo |
-| `iniciar_programador.bat` | Inicia el programador |
-| `ver_estado.bat` | Ver estado general |
-
----
-
-**💡 Recomendación**: Usa `corregir_problema_completo.bat` para mayor facilidad.
+Clic derecho → Propiedades → Desbloquear → Aceptar.

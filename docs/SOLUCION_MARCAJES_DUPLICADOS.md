@@ -34,8 +34,8 @@ Se detectaron las siguientes causas de marcajes duplicados o repetidos:
 ### ✅ 3. Scripts de Limpieza
 Se crearon dos scripts para resolver problemas existentes:
 
-#### `detener_todas_instancias.bat`
-- Detiene todos los procesos Python (programador)
+#### `detener_programador.bat` (antes `detener_todas_instancias.bat`)
+- Detiene solo los procesos del programador (no toca otros Python)
 - Elimina el archivo de lock
 - **Usar cuando**: Multiple instancias están corriendo
 
@@ -49,7 +49,7 @@ Se crearon dos scripts para resolver problemas existentes:
 ### Paso 1: Detener Todas las Instancias
 ```cmd
 cd C:\Users\user\Documents\Repo\GeoVic
-scripts\detener_todas_instancias.bat
+scripts\detener_programador.bat
 ```
 
 ### Paso 2: Limpiar el Registro de Hoy (si tiene datos incorrectos)
@@ -154,7 +154,7 @@ Para evitar este problema en el futuro:
 
 2. **Usar los scripts proporcionados**
    - `iniciar_programador.bat` - Inicia el programador de forma segura
-   - `detener_tarea_programada.bat` - Detiene correctamente
+   - `detener_programador.bat` - Detiene correctamente
    - `ver_estado.bat` - Verifica el estado
 
 3. **Revisar logs regularmente**
@@ -170,7 +170,7 @@ Para evitar este problema en el futuro:
 Si el problema persiste:
 
 1. Revise los logs más recientes
-2. Ejecute `scripts\diagnostico_completo.bat`
+2. Ejecute `scripts\diagnostico_sistema.bat`
 3. Verifique que solo hay una instancia del programador
 4. Asegúrese de que el registro de ejecuciones es correcto
 

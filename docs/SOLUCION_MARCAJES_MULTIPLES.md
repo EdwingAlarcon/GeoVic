@@ -69,9 +69,11 @@ Ahora las funciones de salida:
 - ✅ **NUEVO:** Verifican que exista entrada previa
 - ✅ Solo entonces calculan variación y ejecutan marcaje
 
-### 2. Script de Verificación de Lock Obsoletos
+### 2. Script de Verificación de Lock Obsoletos (eliminado)
 
-**Archivos creados:**
+> Se eliminó: desde el commit `47a9527` la instancia única la garantiza un mutex del sistema operativo y un lock viejo es inofensivo. Para ver el estado usa `scripts\diagnostico_sistema.bat`.
+
+**Archivos creados entonces:**
 - `scripts/verificar_lock_obsoleto.py`
 - `scripts/verificar_lock_obsoleto.bat`
 
@@ -88,14 +90,14 @@ Se eliminó el registro incorrecto del día 2026-02-09 para permitir que el sist
 
 ### Antes de Iniciar el Programador
 
-1. **Verificar lock files obsoletos:**
+1. **Ver el estado del sistema:**
    ```
-   scripts\verificar_lock_obsoleto.bat
+   scripts\diagnostico_sistema.bat
    ```
 
 2. **Detener instancias previas:**
    ```
-   scripts\detener_todas_instancias.bat
+   scripts\detener_programador.bat
    ```
 
 3. **Iniciar el programador:**

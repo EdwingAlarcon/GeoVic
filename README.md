@@ -327,7 +327,7 @@ pip install pytz tzdata
 
 ### Problemas con marcajes duplicados
 - Ver: [docs/SOLUCION_MARCAJES_DUPLICADOS.md](docs/SOLUCION_MARCAJES_DUPLICADOS.md)
-- Ejecutar: `scripts\corregir_problema_completo.bat`
+- Ejecutar: `scripts\diagnostico_sistema.bat` y, si hay más de una instancia, `scripts\reiniciar_programador.bat` (desde la instancia única, el programador ya no permite dos a la vez)
 
 ## 📝 Ejemplo de Salida del Programador
 

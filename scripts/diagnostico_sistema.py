@@ -4,7 +4,6 @@ Verifica estado del programador, registro de ejecuciones y posibles problemas
 """
 import json
 import sys
-import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
@@ -23,6 +22,7 @@ except (ImportError, AttributeError):
 script_dir = Path(__file__).parent.parent / "src" / "logs"
 registro_file = script_dir / "registro_ejecuciones.json"
 lock_file = script_dir / "programador.lock"
+alerta_file = script_dir / "alertas.log"
 
 def print_header(text):
     print("\n" + "=" * 70)
@@ -38,36 +38,50 @@ def print_warning(text):
 def print_error(text):
     print(f"{RED}❌ {text}{RESET}")
 
+def _procesos_programador():
+    """Procesos python cuya línea de comandos ejecuta programador.py, indexados por PID."""
+    import psutil
+
+    encontrados = {}
+    for p in psutil.process_iter(["pid", "ppid", "name", "cmdline", "create_time"]):
+        nombre = (p.info["name"] or "").lower()
+        comando = " ".join(p.info["cmdline"] or [])
+        if nombre.startswith("python") and "programador.py" in comando:
+            encontrados[p.info["pid"]] = p.info
+    return encontrados
+
+
 def verificar_procesos():
     """Verifica cuántas instancias del programador están corriendo"""
-    print_header("PROCESOS PYTHON ACTIVOS")
-    
+    print_header("PROGRAMADOR EN EJECUCIÓN")
+
     try:
-        result = subprocess.run(
-            ['powershell', '-Command', 
-             'Get-Process | Where-Object {$_.ProcessName -match "python"} | Format-Table ProcessName, Id, StartTime -AutoSize'],
-            capture_output=True,
-            text=True
-        )
-        
-        lines = [l for l in result.stdout.split('\n') if 'python' in l.lower()]
-        count = len(lines)
-        
-        if count == 0:
-            print_warning("No hay procesos Python activos")
-            print("  • El programador NO está corriendo")
-        elif count == 1:
-            print_ok(f"1 proceso Python activo (correcto)")
-            print(result.stdout)
-        else:
-            print_error(f"{count} procesos Python activos (¡PROBLEMA!)")
-            print("  • Hay múltiples instancias del programador")
-            print("  • Ejecute: scripts\\detener_todas_instancias.bat")
-            print()
-            print(result.stdout)
-    
+        procesos = _procesos_programador()
+    except ImportError:
+        print_warning("psutil no disponible - ejecute: pip install -r requirements.txt")
+        return
     except Exception as e:
         print_error(f"Error verificando procesos: {e}")
+        return
+
+    # En Windows el venv lanza python.exe como hijo de otro python.exe: una instancia = 2 procesos.
+    # Se cuentan solo los que no tienen a su padre entre los procesos del programador.
+    instancias = [i for i in procesos.values() if i["ppid"] not in procesos]
+
+    if not instancias:
+        print_warning("El programador NO está corriendo")
+        print("  • Ejecute: scripts\\iniciar_programador.bat")
+        return
+
+    if len(instancias) == 1:
+        print_ok("1 instancia del programador (correcto)")
+    else:
+        print_error(f"{len(instancias)} instancias del programador (¡PROBLEMA!)")
+        print("  • Ejecute: scripts\\detener_programador.bat y luego scripts\\iniciar_programador.bat")
+
+    for i in instancias:
+        inicio = datetime.fromtimestamp(i["create_time"]).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  • PID {i['pid']} - iniciado {inicio}")
 
 def verificar_lock_file():
     """Verifica el estado del archivo de lock"""
@@ -94,7 +108,7 @@ def verificar_lock_file():
                     print_ok(f"Proceso PID {pid} está activo")
                 else:
                     print_warning(f"Proceso PID {pid} NO existe (lock obsoleto)")
-                    print("  • Elimine el lock file o reinicie el programador")
+                    print("  • Es inofensivo: la exclusión de instancia única es del sistema operativo, no de este archivo")
             except ImportError:
                 print_warning("psutil no disponible - No se puede verificar si el proceso existe")
             
@@ -211,6 +225,32 @@ def verificar_logs_recientes():
     else:
         print_warning("No hay log para hoy")
 
+def verificar_alertas_hoy():
+    """Resume las alertas de hoy por usuario (muchas de un mismo usuario suelen ser credenciales incorrectas)"""
+    print_header("ALERTAS DE HOY")
+
+    if not alerta_file.exists():
+        print_ok("No hay archivo de alertas (ningún marcaje ha fallado)")
+        return
+
+    hoy = date.today().isoformat()
+    por_usuario = {}
+    with open(alerta_file, "r", encoding="utf-8", errors="replace") as f:
+        for linea in f:
+            partes = [p.strip() for p in linea.split("|")]
+            if len(partes) >= 4 and partes[0].startswith(hoy):
+                por_usuario[partes[2]] = por_usuario.get(partes[2], 0) + 1
+
+    if not por_usuario:
+        print_ok("Sin alertas hoy")
+        return
+
+    print_warning(f"{sum(por_usuario.values())} alertas hoy:")
+    for usuario, cantidad in sorted(por_usuario.items(), key=lambda x: -x[1]):
+        print(f"  • {usuario}: {cantidad}")
+    print("  • Muchas alertas de un mismo usuario suelen indicar usuario o contraseña incorrectos en employees.json")
+
+
 def main():
     print("\n" + "╔" + "═" * 68 + "╗")
     print("║" + " " * 20 + "DIAGNÓSTICO COMPLETO" + " " * 28 + "║")
@@ -221,12 +261,13 @@ def main():
     verificar_lock_file()
     verificar_registro_ejecuciones()
     verificar_logs_recientes()
+    verificar_alertas_hoy()
     
     print_header("RESUMEN")
     print()
     print("📋 Acciones recomendadas:")
-    print("  1. Si hay múltiples procesos Python:")
-    print("     → Ejecute: scripts\\detener_todas_instancias.bat")
+    print("  1. Si hay más de una instancia del programador:")
+    print("     → Ejecute: scripts\\detener_programador.bat y luego scripts\\iniciar_programador.bat")
     print()
     print("  2. Si el registro de hoy tiene datos incorrectos:")
     print("     → Ejecute: scripts\\limpiar_registro_hoy.bat")
@@ -235,7 +276,7 @@ def main():
     print("     → Ejecute: scripts\\iniciar_programador.bat")
     print()
     print("  4. Para detener el programador:")
-    print("     → Ejecute: scripts\\detener_tarea_programada.bat")
+    print("     → Ejecute: scripts\\detener_programador.bat")
     print()
 
 if __name__ == "__main__":

@@ -83,16 +83,12 @@ El sistema tenía un registro local (`registro_ejecuciones.json`) que bloqueaba 
 
 ## 🧪 Cómo Probar
 
-### Opción 1: Script de Prueba
-```powershell
-cd c:\Users\ealarconm\Documents\GeoVic
-python scripts\prueba_verificacion_estado.py
+### Opción 1: Ver el registro local
+```cmd
+scripts\ver_estado.bat
 ```
 
-Este script:
-- Muestra el registro local
-- Consulta el estado real en GeoVictoria
-- Detecta y reporta inconsistencias
+Muestra el registro local de marcajes. (El antiguo `prueba_verificacion_estado.py`, que también consultaba el portal, se eliminó: solo probaba al empleado "default" del `.env`, no a los de `employees.json`.)
 
 ### Opción 2: Simulación Manual
 1. Ejecutar marcaje de entrada manualmente
