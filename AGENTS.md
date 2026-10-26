@@ -37,6 +37,7 @@ pytest tests/test_empleados.py
 **Windows convenience scripts** (in `scripts/`):
 - `iniciar_programador.bat` — start the scheduler (window "Programador GeoVictoria")
 - `reiniciar_programador.bat` / `detener_programador.bat` — restart / stop it; they kill only `programador.py` processes, never other Python
+- `iniciar_oculto.bat` / `detener_monitor.bat` — run scheduler + monitor with no windows (hidden consoles, `GEOVICTORIA_HEADLESS=1`); stops what is running first, so it also restarts. Headless real markings are not yet confirmed on the live portal: verify with the monitor ("Confirmada") before relying on it
 - `ejecutar_manual.bat` — one-off marking
 - `ver_estado.bat` — show current scheduler state (calls `scripts/verificar_estado.py`)
 - `diagnostico_sistema.bat` — scheduler instances, lock, registry, recent logs and today's alerts per user

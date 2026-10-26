@@ -9,6 +9,8 @@ Doble clic en el `.bat` que necesites. Todos usan el Python del entorno virtual 
 | `iniciar_programador.bat` | Inicia el programador en una ventana "Programador GeoVictoria" (déjala abierta; puedes minimizarla) |
 | `reiniciar_programador.bat` | Lo detiene y lo vuelve a iniciar. Úsalo tras editar `config\employees.json` o `config\festivos_adicionales.json`: el programador solo lee esos archivos al arrancar |
 | `detener_programador.bat` | Lo detiene matando solo los procesos de `programador.py` (no toca otros Python) |
+| `iniciar_oculto.bat` | Programador y monitor **sin ventanas** (consolas ocultas, navegador headless). Detiene antes lo que haya, así que también reinicia. Todo se ve en `http://127.0.0.1:8765`. ⚠️ Antes de fiarte, confirma un marcaje real en headless: en el monitor debe quedar "Confirmada" (si no, vuelve a `reiniciar_programador.bat`) |
+| `detener_monitor.bat` | Detiene solo el monitor (procesos de `monitor.py`); no toca el programador |
 | `ver_estado.bat` | Muestra qué marcajes se registraron hoy |
 | `ver_log_en_vivo.bat` | Sigue el log del programador en tiempo real. Opcional: el monitor ya trae el panel **Log en vivo** (con usuarios y claves ocultos) |
 | `monitor.bat` | **Monitor web en vivo (solo lectura)**: por empleado, hora programada, estado (pendiente / marcada / **confirmada por el portal** / **NO confirmada** / **vencida**), último login y actividad; latido del programador, instancias y alertas. Abre `http://127.0.0.1:8765`. Deja la ventana abierta mientras lo uses |
