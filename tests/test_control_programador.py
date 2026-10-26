@@ -60,3 +60,19 @@ def test_iniciar_lanza_con_la_ruta_y_el_script_indicados(monkeypatch, tmp_path):
     assert llamadas["kw"]["cwd"] == str(tmp_path)
     if sys.platform == "win32":
         assert llamadas["kw"]["creationflags"] & cp.subprocess.CREATE_NO_WINDOW
+
+
+def test_lanzar_marcado_pasa_los_pares_al_script(monkeypatch, tmp_path):
+    llamadas = {}
+
+    class FalsoPopen:
+        def __init__(self, cmd, **kw):
+            llamadas.update(cmd=cmd, kw=kw)
+            self.pid = 77
+
+    monkeypatch.setattr(cp.subprocess, "Popen", FalsoPopen)
+    pendientes = [{"id": "emp4", "nombre": "Ana", "accion": "salida"}, {"id": "emp2", "nombre": "Luis", "accion": "entrada"}]
+    assert cp.lanzar_marcado(tmp_path, pendientes, python="py") == 77
+    assert llamadas["cmd"][0] == "py" and llamadas["cmd"][1].endswith("marcar_pendientes.py")
+    assert llamadas["cmd"][2:] == ["emp4:salida", "emp2:entrada"]  # solo ids y acción, nunca credenciales
+    assert llamadas["kw"]["cwd"] == str(tmp_path)

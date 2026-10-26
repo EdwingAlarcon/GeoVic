@@ -149,7 +149,7 @@ def leer_log(nombre: str, cuantas: int = 150, ruta_empleados: Optional[Path] = N
 # --- Control del programador (única parte que actúa; nunca toca el portal) ----------
 
 RAIZ = Path(__file__).resolve().parent.parent
-ACCIONES = ("iniciar", "detener", "reiniciar")
+ACCIONES = ("iniciar", "detener", "reiniciar", "marcar_pendientes")
 _LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
 
@@ -226,10 +226,53 @@ class Manejador(BaseHTTPRequestHandler):
     def _json(self, codigo: int, cuerpo: Dict) -> None:
         self._responder(codigo, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
+    def _no_permitido(self):
+        """PUT, DELETE y PATCH no existen: se lee el cuerpo (ver do_POST) y se contesta 405."""
+        try:
+            largo = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            largo = 0
+        if largo > 0:
+            self.rfile.read(min(largo, 1024))
+        if largo > 1024:
+            self.close_connection = True
+        self._responder(405, b"Metodo no permitido", "text/plain; charset=utf-8")
+
+    do_PUT = do_DELETE = do_PATCH = _no_permitido
+
+    def _marcar_pendientes(self, estado: Dict) -> None:
+        """Lanza el marcado de los pendientes (vencidos o contradichos por el portal) en segundo plano.
+
+        La lista se recalcula aquí con el estado del servidor: no se confía en lo que muestre la página.
+        Quien marca (scripts/marcar_pendientes.py) vuelve a comprobar el portal antes de cada clic.
+        """
+        pendientes = estado_monitor.pendientes_de_marcar(estado)
+        if not pendientes:
+            return self._json(200, {"ok": True, "mensaje": "No hay marcajes pendientes."})
+        try:
+            control_programador.lanzar_marcado(self.server.raiz, pendientes)
+        except Exception as e:
+            bitacora.registrar("control", accion="marcar_pendientes", ok=False, error=str(e))
+            return self._json(500, {"ok": False, "mensaje": f"No se pudo iniciar el marcado: {e}"})
+        bitacora.registrar("control", accion="marcar_pendientes", ok=True, pendientes=len(pendientes))
+        self.server.invalidar_estado()
+        nombres = ", ".join(f"{p['nombre']} ({p['accion']})" for p in pendientes)
+        self._json(200, {"ok": True, "mensaje": f"Marcando {len(pendientes)} pendiente(s): {nombres}. "
+                                                "El estado se actualiza en 1 o 2 minutos."})
+
     def do_POST(self):
         """Única ruta que actúa: /api/accion. Solo desde este equipo, con token si lo hay, con cabecera
         propia (un formulario de otra web no puede enviarla) y sin reiniciar a mitad de un marcaje."""
         url = urlparse(self.path)
+        # El cuerpo se lee SIEMPRE, antes de cualquier respuesta: si se contesta (401, 403, 404…) con
+        # el cuerpo sin leer, Windows cierra la conexión a lo bruto y el cliente no llega a ver el error.
+        try:
+            largo = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            largo = 0
+        crudo = self.rfile.read(min(largo, 1024)) if largo > 0 else b""
+        if largo > 1024:
+            self.close_connection = True  # cuerpo desmesurado: se responde y se cierra
         if url.path != "/api/accion":
             return self._json(404, {"ok": False, "mensaje": "No encontrado"})
         if not self._es_local():
@@ -240,8 +283,7 @@ class Manejador(BaseHTTPRequestHandler):
         if self.headers.get("X-GeoVic-Accion") != "1" or (origen and urlparse(origen).netloc != self.headers.get("Host")):
             return self._json(403, {"ok": False, "mensaje": "Petición no válida."})
         try:
-            largo = int(self.headers.get("Content-Length") or 0)
-            datos = json.loads(self.rfile.read(min(largo, 1024)) or b"{}")
+            datos = json.loads(crudo or b"{}")
             accion, forzar = datos.get("accion"), bool(datos.get("forzar"))
         except (ValueError, AttributeError):
             return self._json(400, {"ok": False, "mensaje": "Cuerpo no válido."})
@@ -252,6 +294,8 @@ class Manejador(BaseHTTPRequestHandler):
             return self._json(409, {"ok": False, "mensaje": "Ya hay una acción en curso."})
         try:
             estado, _ = self.server.estado()
+            if accion == "marcar_pendientes":
+                return self._marcar_pendientes(estado)
             bloqueo = None if accion == "iniciar" else estado_monitor.bloqueo_por_marcaje(estado, datetime.now())
             if bloqueo and not forzar:
                 return self._json(409, {"ok": False, "bloqueado": bloqueo,
@@ -278,7 +322,9 @@ class Manejador(BaseHTTPRequestHandler):
             self._responder(200, self.server.estado_json(), "application/json; charset=utf-8")
         elif url.path == "/api/control":
             estado, _ = self.server.estado()
-            cuerpo = {"permitido": self._es_local(), "bloqueo": estado_monitor.bloqueo_por_marcaje(estado, datetime.now())}
+            cuerpo = {"permitido": self._es_local(), "bloqueo": estado_monitor.bloqueo_por_marcaje(estado, datetime.now()),
+                      "pendientes": [{"nombre": p["nombre"], "accion": p["accion"]}
+                                     for p in estado_monitor.pendientes_de_marcar(estado)]}
             self._responder(200, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         elif url.path == "/api/log":
             consulta = parse_qs(url.query)
@@ -326,6 +372,7 @@ button{font:inherit;padding:5px 12px;border-radius:8px;border:1px solid var(--bd
  <section class="card"><h2>Programador</h2><div class="grid" id="prog"></div>
   <div id="ctl" hidden style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
    <button id="b-reiniciar">↻ Reiniciar</button><button id="b-detener">■ Detener</button><button id="b-iniciar">▶ Iniciar</button>
+   <button id="b-marcar" hidden style="font-weight:700">✋ Marcar pendientes</button>
    <span class="small" id="ctlmsg"></span></div></section>
  <section class="card"><h2>Resumen del día</h2><div id="resumen"></div></section>
  <section class="card"><h2>Empleados</h2><div class="wrap"><table><thead><tr><th>Empleado</th><th>Entrada</th><th>Salida</th><th>Último login</th></tr></thead><tbody id="filas"></tbody></table></div></section>
@@ -419,10 +466,18 @@ async function accion(nombre, forzar){
   botones.forEach(b => b.disabled = false); ciclo();
 }
 for (const n of ["reiniciar","detener","iniciar"]) document.getElementById("b-"+n).onclick = () => { if (confirm("¿Seguro que quieres " + TXT[n] + " el programador?")) accion(n, false); };
+let pendientes = [];
+document.getElementById("b-marcar").onclick = () => {
+  const lista = pendientes.map(p => "• " + p.nombre + " — " + p.accion).join("\n");
+  if (confirm("Se intentará marcar:\n\n" + lista + "\n\nSolo se hace clic si el portal ofrece ese botón (si ya está marcado, no se duplica).\n¿Continuar?")) accion("marcar_pendientes", false);
+};
 async function cicloControl(){
   try {
     const r = await fetch("/api/control" + (T ? "?t=" + encodeURIComponent(T) : ""), {cache:"no-store"}); const d = await r.json();
     const caja = document.getElementById("ctl"); caja.hidden = !d.permitido;
+    pendientes = d.pendientes || [];
+    const bm = document.getElementById("b-marcar"); bm.hidden = !pendientes.length;
+    bm.textContent = "✋ Marcar pendientes (" + pendientes.length + ")";
     ["reiniciar","detener"].forEach(n => document.getElementById("b-"+n).title = d.bloqueo ? "Ahora no conviene: " + d.bloqueo : "");
   } catch(e){}
 }

@@ -7,8 +7,10 @@ Ejecutar a mano (pytest NO la recoge: el nombre no empieza por test_):
 
 Cubre lo que importa para tener certeza de que se marcó:
   u1, u2  marcan bien y deben quedar CONFIRMADOS por el segundo login.
-  u3      el clic "funciona" pero el portal NO lo guarda: debe salir NO CONFIRMADO y disparar alerta.
-  u4      clave mala: login fallido y marcaje VENCIDO.
+  u3      el clic "funciona" pero el portal NUNCA lo guarda: se anula su registro, se reintenta 2 veces
+          (3 clics en total, ninguno de más), y al agotarlos queda VENCIDO y con alerta.
+  u4      clave mala: login fallido y marcaje VENCIDO, sin reintentos.
+  u5      pierde solo el primer clic: el reintento automático lo recupera y queda CONFIRMADO.
   Además: latido vivo, una sola instancia, 0 clics duplicados y ninguna credencial en la bitácora.
 
 Trabaja en una copia temporal con empleados ficticios. No toca config/employees.json ni el portal real.
@@ -31,9 +33,10 @@ from urllib.parse import parse_qs, urlparse
 REPO = Path(__file__).resolve().parent.parent
 PORT_MONITOR = 8793
 
-estado = {"u1": "Entrada", "u2": "Entrada", "u3": "Entrada", "u4": "Entrada"}
+estado = {"u1": "Entrada", "u2": "Entrada", "u3": "Entrada", "u4": "Entrada", "u5": "Entrada"}
 clics = {k: 0 for k in estado}
-PERDER = {"u3"}  # su clic "funciona" pero el portal NO lo registra
+PERDER = {"u3"}  # su clic "funciona" pero el portal NO lo registra, nunca
+PERDER_VECES = {"u5": 1}  # solo pierde el primer clic; el reintento sí queda
 LOGIN = ('<html><body>{m}<form method="post" action="/account/login"><input id="user" name="u">'
          '<input type="password" name="p"><button id="btnLogin" type="submit">Ingresar</button></form></body></html>')
 
@@ -63,7 +66,7 @@ class PortalFalso(BaseHTTPRequestHandler):
                          f'.then(()=>this.remove())">Marcar {e}</button></body></html>' if e else "<html><body>nada</body></html>")
         elif u.path == "/marcar":
             clics[usr] += 1
-            if usr not in PERDER:
+            if usr not in PERDER and clics[usr] > PERDER_VECES.get(usr, 0):
                 estado[usr] = "Salida" if estado[usr] == "Entrada" else "Entrada"
             self._s(200, "ok")
         else:
@@ -105,7 +108,8 @@ def main() -> int:
                 shutil.copy(REPO / "config" / f, sandbox / "config" / f)
 
         objetivo = datetime.now() + timedelta(seconds=100)
-        nombres = [("u1", "Uno"), ("u2", "Dos"), ("u3", "Tres perdida"), ("u4", "Cuatro clave mala")]
+        nombres = [("u1", "Uno"), ("u2", "Dos"), ("u3", "Tres perdida"), ("u4", "Cuatro clave mala"),
+                   ("u5", "Cinco recupera")]
         empleados = {"employees": [
             {"id": f"t{i}", "nombre": f"Prueba {n}", "usuario": u, "password": "ok", "activo": True,
              "horario": {"entrada_semana_hora": objetivo.hour, "entrada_semana_minuto": objetivo.minute,
@@ -115,13 +119,13 @@ def main() -> int:
         ruta_emp.write_text(json.dumps(empleados), encoding="utf-8")
 
         env = dict(os.environ, GEOVICTORIA_LOGIN_URL=url, GEOVICTORIA_HEADLESS="1",
-                   GEOVICTORIA_CONFIRMAR_DEMORA="20", PYTHONIOENCODING="utf-8")
+                   GEOVICTORIA_CONFIRMAR_DEMORA="15", GEOVICTORIA_REINTENTO_DEMORA="15", PYTHONIOENCODING="utf-8")
         procesos.append(subprocess.Popen([sys.executable, "src/programador.py"], cwd=sandbox, env=env,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         procesos.append(subprocess.Popen([sys.executable, "scripts/monitor.py", "--puerto", str(PORT_MONITOR),
                                           "--empleados", str(ruta_emp)], cwd=sandbox, env=env,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-        fin = objetivo + timedelta(seconds=250)
+        fin = objetivo + timedelta(seconds=330)  # da margen a 1 clic + 2 reintentos (cada ciclo ≈ 60-70 s)
         print(f"Ahora {datetime.now():%H:%M:%S}; entrada programada {objetivo:%H:%M} (+0..30 s); termina ~{fin:%H:%M:%S}", flush=True)
         while datetime.now() < fin:
             time.sleep(30)
@@ -147,11 +151,21 @@ def main() -> int:
         ("una sola instancia", d["programador"]["instancias"] == 1),
         ("u1 marcó y quedó CONFIRMADA", fila["Uno"]["estado"] == "confirmada" and fila["Uno"]["exitos"] == 1),
         ("u2 marcó y quedó CONFIRMADA", fila["Dos"]["estado"] == "confirmada" and fila["Dos"]["exitos"] == 1),
-        ("u3 (clic perdido) salió NO CONFIRMADA", fila["Tres"]["estado"] == "no_confirmada"),
-        ("u3 disparó la alerta del portal", "NO CONFIRMADO por el portal" in alertas),
-        ("u4 (clave mala) quedó VENCIDA sin marcaje", fila["Cuatro"]["estado"] == "vencida" and fila["Cuatro"]["hora"] is None),
+        ("u3 (clic siempre perdido) agotó los reintentos y quedó VENCIDA, sin marca falsa",
+         fila["Tres"]["estado"] == "vencida" and fila["Tres"]["hora"] is None),
+        ("u3 hizo 3 clics: el original y 2 reintentos, ninguno de más", clics["u3"] == 3),
+        ("u3 disparó la alerta al agotar los reintentos", "NO CONFIRMADO por el portal" in alertas),
+        ("u3 tiene su registro anulado en la bitácora",
+         any(e["tipo"] == "registro_anulado" and e.get("emp_id") == "t3" for e in eventos)),
+        ("u5 (pierde el primer clic) se recuperó con un reintento: CONFIRMADA",
+         fila["Cinco"]["estado"] == "confirmada" and clics["u5"] == 2),
+        ("u5 dejó constancia del reintento",
+         any(e["tipo"] == "reintento" and e.get("emp_id") == "t5" and e.get("resultado") == "ok" for e in eventos)),
+        ("u4 (clave mala) quedó VENCIDA sin marcaje ni reintentos",
+         fila["Cuatro"]["estado"] == "vencida" and fila["Cuatro"]["hora"] is None and clics["u4"] == 0
+         and not any(e["tipo"] == "reintento_programado" and e.get("emp_id") == "t4" for e in eventos)),
         ("el nivel general es CRÍTICO", d["nivel"] == "critico"),
-        ("0 clics duplicados (1, 1, 1 y 0)", clics == {"u1": 1, "u2": 1, "u3": 1, "u4": 0}),
+        ("0 clics duplicados (1, 1, 3, 0 y 2)", clics == {"u1": 1, "u2": 1, "u3": 3, "u4": 0, "u5": 2}),
         ("la bitácora no contiene credenciales", not any(k in json.dumps(eventos) for k in ('"password"', '"usuario"'))),
     ]
     print()

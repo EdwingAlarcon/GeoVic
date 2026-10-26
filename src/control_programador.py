@@ -51,8 +51,8 @@ def detener(espera_seg: float = 10.0) -> int:
     return len(procesos)
 
 
-def iniciar(raiz: Path, python: Optional[str] = None) -> int:
-    """Lanza el programador desacoplado de este proceso y sin ventana. Devuelve el PID del lanzador."""
+def _lanzar(raiz: Path, argumentos: List[str], python: Optional[str] = None) -> int:
+    """Lanza `python <argumentos>` desacoplado de este proceso y sin ventana. Devuelve el PID."""
     opciones = {}
     if sys.platform == "win32":
         opciones["creationflags"] = (subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
@@ -60,10 +60,21 @@ def iniciar(raiz: Path, python: Optional[str] = None) -> int:
     else:
         opciones["start_new_session"] = True
     proceso = subprocess.Popen(
-        [python or sys.executable, str(Path("src") / _SCRIPT)], cwd=str(raiz),
+        [python or sys.executable, *argumentos], cwd=str(raiz),
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **opciones,
     )
     return proceso.pid
+
+
+def iniciar(raiz: Path, python: Optional[str] = None) -> int:
+    """Lanza el programador desacoplado de este proceso y sin ventana. Devuelve el PID del lanzador."""
+    return _lanzar(raiz, [str(Path("src") / _SCRIPT)], python)
+
+
+def lanzar_marcado(raiz: Path, pendientes: List[dict], python: Optional[str] = None) -> int:
+    """Lanza scripts/marcar_pendientes.py para los pares {"id", "accion"} dados (en segundo plano)."""
+    pares = [f"{p['id']}:{p['accion']}" for p in pendientes]
+    return _lanzar(raiz, [str(Path("scripts") / "marcar_pendientes.py"), *pares], python)
 
 
 def esperar_arranque(segundos: float = 15.0) -> bool:

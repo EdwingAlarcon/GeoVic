@@ -284,11 +284,56 @@ def test_ejecutar_accion_reiniciar_detiene_inicia_y_espera(monitor_mod, monkeypa
         monitor_mod.ejecutar_accion("iniciar")
 
 
-def test_control_informa_si_se_permite_y_el_bloqueo(monitor_mod, empleados_json, monkeypatch):
+def test_control_informa_si_se_permite_el_bloqueo_y_los_pendientes(monitor_mod, empleados_json, monkeypatch):
     monkeypatch.setattr(monitor_mod.estado_monitor, "bloqueo_por_marcaje", lambda estado, ahora: "Ana: algo")
+    monkeypatch.setattr(monitor_mod.estado_monitor, "pendientes_de_marcar",
+                        lambda estado: [{"id": "e1", "nombre": "Ana", "accion": "salida"}])
     srv = _servidor(monitor_mod, empleados_json)
     try:
         estado, cuerpo = _get(srv, "/api/control")
-        assert estado == 200 and json.loads(cuerpo) == {"permitido": True, "bloqueo": "Ana: algo"}
+        assert estado == 200 and json.loads(cuerpo) == {
+            "permitido": True, "bloqueo": "Ana: algo", "pendientes": [{"nombre": "Ana", "accion": "salida"}]}
+    finally:
+        srv.shutdown()
+
+
+def test_marcar_pendientes_lanza_el_marcado_solo_con_ids_y_acciones(monitor_mod, empleados_json, monkeypatch):
+    lanzados = []
+    pendientes = [{"id": "e1", "nombre": "Ana", "accion": "salida"}]
+    monkeypatch.setattr(monitor_mod.estado_monitor, "pendientes_de_marcar", lambda estado: pendientes)
+    monkeypatch.setattr(monitor_mod.control_programador, "lanzar_marcado", lambda raiz, p: lanzados.append(p) or 1)
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        estado, cuerpo = _post(srv, {"accion": "marcar_pendientes"}, OK)
+        assert estado == 200 and cuerpo["ok"] and "Ana" in cuerpo["mensaje"] and lanzados == [pendientes]
+        assert any(e["tipo"] == "control" and e["accion"] == "marcar_pendientes" and e["ok"] for e in bitacora.leer_eventos())
+        assert _post(srv, {"accion": "marcar_pendientes"})[0] == 403  # sin la cabecera propia no actúa
+    finally:
+        srv.shutdown()
+
+
+def test_marcar_pendientes_sin_pendientes_no_lanza_nada(monitor_mod, empleados_json, monkeypatch):
+    lanzados = []
+    monkeypatch.setattr(monitor_mod.estado_monitor, "pendientes_de_marcar", lambda estado: [])
+    monkeypatch.setattr(monitor_mod.control_programador, "lanzar_marcado", lambda raiz, p: lanzados.append(p))
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        estado, cuerpo = _post(srv, {"accion": "marcar_pendientes"}, OK)
+        assert estado == 200 and "No hay" in cuerpo["mensaje"] and lanzados == []
+    finally:
+        srv.shutdown()
+
+
+def test_marcar_pendientes_informa_si_no_se_pudo_lanzar(monitor_mod, empleados_json, monkeypatch):
+    def falla(raiz, pendientes):
+        raise OSError("no hay python")
+
+    monkeypatch.setattr(monitor_mod.estado_monitor, "pendientes_de_marcar",
+                        lambda estado: [{"id": "e1", "nombre": "Ana", "accion": "salida"}])
+    monkeypatch.setattr(monitor_mod.control_programador, "lanzar_marcado", falla)
+    srv = _servidor(monitor_mod, empleados_json)
+    try:
+        estado, cuerpo = _post(srv, {"accion": "marcar_pendientes"}, OK)
+        assert estado == 500 and "no hay python" in cuerpo["mensaje"]
     finally:
         srv.shutdown()

@@ -90,6 +90,8 @@ def _estado_accion(emp, accion, tipo_dia, ahora, registro, eventos_emp, plan) ->
     clave_tipo = _TIPOS[tipo_dia][0 if accion == "entrada" else 1]
     hoy = ahora.strftime("%Y-%m-%d")
     marca = ((registro or {}).get(hoy) or {}).get(clave_tipo)
+    if marca and marca.get("ejecutado") is False:  # anulada: el portal la contradijo, no cuenta como marca
+        marca = None
 
     exitos = sum(1 for e in eventos_emp
                  if e.get("tipo") == "marcaje" and e.get("accion") == accion_portal and e.get("resultado") == "ok")
@@ -97,6 +99,13 @@ def _estado_accion(emp, accion, tipo_dia, ahora, registro, eventos_emp, plan) ->
                    if e.get("tipo") == "marcaje" and e.get("esperada") == accion_portal)
     confirmaciones = [e for e in eventos_emp if e.get("tipo") == "confirmacion" and e.get("accion") == accion_portal]
     confirmada = confirmaciones[-1].get("confirmada") if confirmaciones else None
+    if confirmada is None and marca:
+        # Sin confirmación propia, cualquier login posterior a la marca que vea el portal ofreciendo
+        # ese mismo botón demuestra que la marca no quedó (el registro local la daba por hecha).
+        vistos = [e for e in eventos_emp if e.get("tipo") == "estado_portal"
+                  and str(e.get("ts", "")) > str(marca.get("hora") or "")]
+        if vistos and vistos[-1].get("boton") == accion_portal:
+            confirmada = False
 
     programada = _programada(emp, plan, ahora, accion)
     resultado = {"programada": programada, "estado": "pendiente", "hora": None, "origen": None,
@@ -125,6 +134,10 @@ def _estado_accion(emp, accion, tipo_dia, ahora, registro, eventos_emp, plan) ->
         if ahora.timestamp() > limite:
             resultado["estado"] = "vencida"
             resultado["detalle"] = "pasó su hora y no hay marcaje registrado"
+            reintentos = [e for e in eventos_emp
+                          if e.get("tipo") == "reintento_programado" and e.get("tipo_marcaje") == clave_tipo]
+            if reintentos:
+                resultado["detalle"] += f" · reintento {reintentos[-1].get('reintento')} programado"
     return resultado
 
 
@@ -338,3 +351,18 @@ def bloqueo_por_marcaje(estado: Dict, ahora: datetime) -> Optional[str]:
             elif a.get("estado") == "marcada" and str(a.get("detalle", "")).startswith("esperando"):
                 return f"{fila.get('nombre')}: se está confirmando su {accion} en el portal"
     return None
+
+
+def pendientes_de_marcar(estado: Dict) -> List[Dict]:
+    """Marcajes de hoy que hay que hacer: vencidos o contradichos por el portal.
+
+    Devuelve [{"id", "nombre", "accion"}] con accion "entrada" o "salida". Los usa el botón
+    "Marcar pendientes" del monitor; quien marca vuelve a comprobar el portal antes de cada clic,
+    así que esta lista nunca basta por sí sola para marcar.
+    """
+    pendientes: List[Dict] = []
+    for fila in estado.get("empleados", []):
+        for accion in ("entrada", "salida"):
+            if (fila.get(accion) or {}).get("estado") in ("vencida", "no_confirmada"):
+                pendientes.append({"id": fila.get("id"), "nombre": fila.get("nombre"), "accion": accion})
+    return pendientes

@@ -267,3 +267,53 @@ def test_bloquea_mientras_se_espera_la_confirmacion():
 
 def test_bloqueo_tolera_estado_con_error():
     assert em.bloqueo_por_marcaje({"error": "x"}, datetime(2026, 10, 26, 8, 0, 0)) is None
+
+
+# --- Registro anulado, reintentos y pendientes de marcar ------------------------
+
+def _anulada():
+    return {"2026-10-26": {"ENTRADA SEMANA (L-V)": {"ejecutado": False, "hora": "2026-10-26T08:00:20",
+                                                    "origen": "programador", "anulado": "el portal la contradijo"}}}
+
+
+def test_marca_anulada_no_cuenta_como_marcaje_y_se_ve_vencida():
+    e = estado([emp()], registros={"e1": _anulada()})  # LUNES 09:40, entrada 08:00
+    assert entrada(e)["estado"] == "vencida" and entrada(e)["hora"] is None
+
+
+def test_muestra_que_hay_un_reintento_programado():
+    ev = [{"tipo": "reintento_programado", "emp_id": "e1", "tipo_marcaje": "ENTRADA SEMANA (L-V)", "reintento": 1}]
+    e = estado([emp()], registros={"e1": _anulada()}, eventos=ev)
+    assert "reintento 1 programado" in entrada(e)["detalle"]
+
+
+def test_pendientes_de_marcar_son_los_vencidos_y_los_no_confirmados():
+    fila = lambda i, ent, sal: {"id": i, "nombre": i.upper(), "entrada": {"estado": ent}, "salida": {"estado": sal}}
+    e = {"empleados": [fila("a", "confirmada", "pendiente"), fila("b", "vencida", "pendiente"),
+                       fila("c", "confirmada", "no_confirmada"), fila("d", "marcada", "marcada")]}
+    assert em.pendientes_de_marcar(e) == [
+        {"id": "b", "nombre": "B", "accion": "entrada"}, {"id": "c", "nombre": "C", "accion": "salida"}]
+    assert em.pendientes_de_marcar({"error": "x"}) == []
+
+
+def test_login_posterior_que_ve_el_mismo_boton_contradice_la_marca():
+    """Caso real del 26-oct: el registro daba la salida por hecha, pero un login posterior vio que el portal
+    seguía ofreciendo 'Salida'. El monitor debe mostrarla NO confirmada, no 'marcada'."""
+    reg = registro(hora="2026-10-26T08:00:20")
+    ev = [{"tipo": "estado_portal", "emp_id": "e1", "ts": "2026-10-26T08:01:30", "boton": "Entrada"}]
+    assert entrada(estado([emp()], registros={"e1": reg}, eventos=ev))["estado"] == "no_confirmada"
+
+
+def test_login_que_ve_otro_boton_o_es_anterior_a_la_marca_no_la_contradice():
+    reg = registro(hora="2026-10-26T08:00:20")
+    despues_otro_boton = [{"tipo": "estado_portal", "emp_id": "e1", "ts": "2026-10-26T08:01:30", "boton": "Salida"}]
+    antes_de_la_marca = [{"tipo": "estado_portal", "emp_id": "e1", "ts": "2026-10-26T07:59:00", "boton": "Entrada"}]
+    assert entrada(estado([emp()], registros={"e1": reg}, eventos=despues_otro_boton))["estado"] == "marcada"
+    assert entrada(estado([emp()], registros={"e1": reg}, eventos=antes_de_la_marca))["estado"] == "marcada"
+
+
+def test_una_confirmacion_propia_manda_sobre_el_estado_observado():
+    reg = registro(hora="2026-10-26T08:00:20")
+    ev = [{"tipo": "estado_portal", "emp_id": "e1", "ts": "2026-10-26T08:01:30", "boton": "Entrada"},
+          {"tipo": "confirmacion", "emp_id": "e1", "ts": "2026-10-26T08:02:00", "accion": "Entrada", "confirmada": True}]
+    assert entrada(estado([emp()], registros={"e1": reg}, eventos=ev))["estado"] == "confirmada"

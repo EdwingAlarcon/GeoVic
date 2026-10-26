@@ -30,6 +30,7 @@ from src.empleados import cargar_empleados, obtener_horario_dia
 from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import run, verificar_estado
+from src.reintentos import demora_reintento_desde_entorno, puede_reintentar, reintentos_desde_entorno
 
 # ---------------------------------------------------------------------------
 # Paths de archivos de estado
@@ -110,8 +111,14 @@ def _aplicar_offset(hora: int, minuto: int, offset_segundos: int):
 CONFIRMAR = os.getenv("GEOVICTORIA_CONFIRMAR", "1").strip().lower() not in ("0", "false", "no")
 CONFIRMAR_DEMORA_SEG = int(os.getenv("GEOVICTORIA_CONFIRMAR_DEMORA", "90"))
 
+# Reintento de marcajes que el portal no registró: solo si un login nuevo comprueba que el portal SIGUE
+# ofreciendo el botón (así no puede duplicar). GEOVICTORIA_REINTENTOS=0 lo desactiva.
+REINTENTOS_MAX = reintentos_desde_entorno()
+REINTENTO_DEMORA_SEG = demora_reintento_desde_entorno()
+
 _scheduler: Optional[BlockingScheduler] = None  # lo fija main(); permite programar confirmaciones
 _cola_confirmaciones: list = []                 # confirmaciones pedidas antes de que exista el scheduler
+_cola_reintentos: list = []                     # reintentos pedidos antes de que exista el scheduler
 _PLAN: Dict = {}      # hora programada real (con escalonado) de cada empleado y día, para el monitor
 _NOMBRES: Dict = {}   # id -> nombre, para anotar eventos que solo conocen el id
 _INICIO = datetime.now().isoformat(timespec="seconds")
@@ -181,10 +188,33 @@ def ya_se_ejecuto_hoy(emp_id: str, tipo_marcaje: str) -> bool:
     return registro.get(hoy, {}).get(tipo_marcaje, {}).get("ejecutado", False)
 
 
+def anular_registro(emp_id: str, tipo_marcaje: str, motivo: str) -> None:
+    """Marca como NO ejecutado un marcaje de hoy que el portal contradice.
+
+    Un registro falso ("hecho") bloquea todo reintento y engaña al monitor. La marca original se
+    conserva con `anulado` y `anulado_en` como evidencia, pero deja de contar como ejecutada.
+    """
+    try:
+        registro = leer_registro(emp_id)
+        marca = registro.get(date.today().isoformat(), {}).get(tipo_marcaje)
+        if not marca or not marca.get("ejecutado", True):
+            return
+        marca["ejecutado"] = False
+        marca["anulado"] = motivo
+        marca["anulado_en"] = datetime.now().isoformat(timespec="seconds")
+        bitacora.escribir_json_atomico(_registro_path(emp_id), registro)
+        bitacora.registrar("registro_anulado", {"id": emp_id, "nombre": _NOMBRES.get(emp_id)},
+                           tipo_marcaje=tipo_marcaje, motivo=motivo)
+        logger.warning(f"[{emp_id}] Registro de {tipo_marcaje} ANULADO: {motivo}")
+    except Exception as e:
+        logger.error(f"[{emp_id}] Error anulando registro: {e}")
+
+
 def tiempo_desde_ultimo_marcaje(emp_id: str) -> float:
     registro = leer_registro(emp_id)
     hoy = date.today().isoformat()
-    timestamps = [v["timestamp"] for v in registro.get(hoy, {}).values() if "timestamp" in v]
+    timestamps = [v["timestamp"] for v in registro.get(hoy, {}).values()
+                  if "timestamp" in v and v.get("ejecutado", True)]  # un marcaje anulado no cuenta para el cooldown
     if not timestamps:
         return float("inf")
     return datetime.now().timestamp() - max(timestamps)
@@ -256,16 +286,19 @@ def _portal_refleja_marcaje_completado(tipo_marcaje: str, boton_disponible: Opti
 
 
 def _programar_confirmacion(empleado: Dict, tipo_marcaje: str, accion: str,
-                            demora: int = CONFIRMAR_DEMORA_SEG, intento: int = 1) -> None:
-    """Agenda la confirmación independiente de un marcaje (un segundo login al portal)."""
+                            demora: int = CONFIRMAR_DEMORA_SEG, intento: int = 1, reintento: int = 0) -> None:
+    """Agenda la confirmación independiente de un marcaje (un segundo login al portal).
+
+    `reintento` es el número del reintento de marcaje que originó este clic (0 = el original).
+    """
     if not CONFIRMAR:
         return
     if _scheduler is None:  # marcaje hecho durante el arranque: se agenda cuando exista el scheduler
-        _cola_confirmaciones.append((empleado, tipo_marcaje, accion, demora, intento))
+        _cola_confirmaciones.append((empleado, tipo_marcaje, accion, demora, intento, reintento))
         return
     try:
         _scheduler.add_job(
-            partial(confirmar_marcaje_emp, empleado, tipo_marcaje, accion, intento),
+            partial(confirmar_marcaje_emp, empleado, tipo_marcaje, accion, intento, reintento),
             "date",
             run_date=datetime.now(_scheduler.timezone) + timedelta(seconds=demora),
             id=f"confirmar_{empleado['id']}_{tipo_marcaje}_{intento}",
@@ -276,10 +309,13 @@ def _programar_confirmacion(empleado: Dict, tipo_marcaje: str, accion: str,
         logger.warning(f"[{empleado['nombre']}] No se pudo agendar la confirmación de {tipo_marcaje}: {e}")
 
 
-def confirmar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, intento: int = 1) -> None:
+def confirmar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, intento: int = 1,
+                          reintento: int = 0) -> None:
     """Segundo login independiente: comprueba en el portal que el marcaje realmente quedó.
 
-    No reintenta el marcaje (podría duplicarlo): solo deja constancia y alerta si no se confirma.
+    Si el portal SIGUE ofreciendo el botón, el marcaje no quedó: se anula el registro local y se
+    programa un reintento (no puede duplicar, porque solo se vuelve a hacer clic si un login nuevo
+    sigue viendo ese botón). Agotados los reintentos, deja la alerta.
     """
     emp_id, emp_nombre = empleado["id"], empleado["nombre"]
     tag = f"[{emp_nombre}]"
@@ -298,11 +334,91 @@ def confirmar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, intent
         logger.info(f"{tag} ✅ {tipo_marcaje} CONFIRMADO por el portal (ahora ofrece '{boton}')")
     elif confirmada is False:
         logger.error(f"{tag} ❌ {tipo_marcaje} NO confirmado: el portal sigue ofreciendo '{boton}'")
-        alertar_fallo(emp_nombre, tipo_marcaje, "NO CONFIRMADO por el portal")
+        anular_registro(emp_id, tipo_marcaje, "el portal sigue ofreciendo el botón de esa acción")
+        if not _programar_reintento(empleado, tipo_marcaje, accion, reintento + 1):
+            alertar_fallo(emp_nombre, tipo_marcaje, "NO CONFIRMADO por el portal")
     else:
         logger.warning(f"{tag} ⚠️ Confirmación de {tipo_marcaje} no concluyente (botón: {boton})")
         if intento < 2:
-            _programar_confirmacion(empleado, tipo_marcaje, accion, demora=300, intento=intento + 1)
+            _programar_confirmacion(empleado, tipo_marcaje, accion, demora=300, intento=intento + 1,
+                                    reintento=reintento)
+
+
+def _hora_programada(empleado: Dict, accion: str, dia: date) -> time:
+    h = obtener_horario_dia(empleado["horario"], dia.weekday())
+    return time(h["entrada_hora"], h["entrada_minuto"]) if accion == "Entrada" else time(h["salida_hora"], h["salida_minuto"])
+
+
+def _programar_reintento(empleado: Dict, tipo_marcaje: str, accion: str, reintento: int) -> bool:
+    """Agenda el reintento número `reintento` de un marcaje que el portal no registró.
+
+    Devuelve False (y no agenda nada) si ya no corresponde: reintentos agotados o desactivados, o
+    fuera de la franja horaria del marcaje. El llamador debe entonces dejar la alerta.
+    """
+    tag = f"[{empleado['nombre']}]"
+    hoy = date.today()
+    ok, motivo = puede_reintentar(datetime.now(), _hora_programada(empleado, accion, hoy), reintento, REINTENTOS_MAX)
+    if not ok:
+        logger.warning(f"{tag} No se reintenta {tipo_marcaje}: {motivo}")
+        return False
+    if _scheduler is None:  # durante el arranque: se agenda cuando exista el scheduler
+        _cola_reintentos.append((empleado, tipo_marcaje, accion, reintento))
+        return True
+    try:
+        _scheduler.add_job(
+            partial(reintentar_marcaje_emp, empleado, tipo_marcaje, accion, reintento),
+            "date",
+            run_date=datetime.now(_scheduler.timezone) + timedelta(seconds=REINTENTO_DEMORA_SEG),
+            id=f"reintento_{empleado['id']}_{tipo_marcaje}_{reintento}",
+            name=f"[{empleado['nombre']}] Reintento {reintento} de {tipo_marcaje}",
+            replace_existing=True,
+        )
+    except Exception as e:
+        logger.warning(f"{tag} No se pudo agendar el reintento de {tipo_marcaje}: {e}")
+        return False
+    bitacora.registrar("reintento_programado", empleado, tipo_marcaje=tipo_marcaje, reintento=reintento,
+                       en_seg=REINTENTO_DEMORA_SEG)
+    logger.warning(f"{tag} 🔁 {tipo_marcaje} no quedó en el portal: reintento {reintento}/{REINTENTOS_MAX} "
+                   f"en {REINTENTO_DEMORA_SEG} s")
+    return True
+
+
+def reintentar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, reintento: int) -> None:
+    """Vuelve a intentar un marcaje que el portal no registró.
+
+    El registro local NO manda aquí: manda el portal. run() solo hace clic si el portal ofrece el
+    botón esperado, y un botón ofrecido significa que ese marcaje no existe, así que no duplica.
+    """
+    emp_id, emp_nombre = empleado["id"], empleado["nombre"]
+    tag = f"[{emp_nombre}]"
+    hoy = date.today()
+    if es_festivo(hoy) or hoy.weekday() == 6:
+        return
+    get_cache().invalidar(f"estado_{emp_id}")
+    logger.warning(f"{tag} 🔁 Reintento {reintento}/{REINTENTOS_MAX} de {tipo_marcaje}")
+    try:
+        resultado = asyncio.run(run(accion_esperada=accion, empleado=empleado))
+    except Exception as e:
+        logger.error(f"{tag} Error en el reintento de {tipo_marcaje}: {e}")
+        resultado = None
+    bitacora.registrar("reintento", empleado, tipo_marcaje=tipo_marcaje, reintento=reintento,
+                       resultado="ok" if resultado else "no_realizado")
+
+    if resultado:
+        tipo_real = determinar_tipo_marcaje(resultado, hoy.weekday())
+        guardar_registro(emp_id, tipo_real, 0)
+        logger.info(f"{tag} ✅ Reintento {reintento} completado: {resultado} — guardado como '{tipo_real}'")
+        _programar_confirmacion(empleado, tipo_real, resultado, reintento=reintento)
+        return
+
+    get_cache().invalidar(f"estado_{emp_id}")
+    boton = verificar_estado_emp(emp_id, empleado)
+    if _portal_refleja_marcaje_completado(tipo_marcaje, boton):
+        guardar_registro(emp_id, tipo_marcaje, 0, origen="portal")
+        logger.info(f"{tag} ℹ️ El portal ya refleja {tipo_marcaje} (botón: {boton}) — sincronizado")
+        return
+    if not _programar_reintento(empleado, tipo_marcaje, accion, reintento + 1):
+        alertar_fallo(emp_nombre, tipo_marcaje, f"no se pudo marcar tras {reintento} reintento(s)")
 
 
 def ejecutar_marcaje_emp(
@@ -389,6 +505,10 @@ def ejecutar_marcaje_emp(
                 return accion_esperada
 
             logger.warning(f"{tag} ⚠️ Marcaje no ejecutado")
+            # Si el portal sigue ofreciendo ese botón, el marcaje no existe: se reintenta (sin alerta
+            # todavía; la deja el último reintento si tampoco funciona).
+            if boton == accion_esperada and _programar_reintento(empleado, tipo_marcaje, accion_esperada, 1):
+                return accion
             alertar_fallo(emp_nombre, tipo_marcaje)
 
         return accion
@@ -710,8 +830,12 @@ def _preparar_scheduler(scheduler: BlockingScheduler) -> None:
                       name="Latido del scheduler", max_instances=1, coalesce=True)
     pendientes = list(_cola_confirmaciones)
     _cola_confirmaciones.clear()
-    for empleado, tipo, accion, demora, intento in pendientes:
-        _programar_confirmacion(empleado, tipo, accion, demora=min(demora, 30), intento=intento)
+    for empleado, tipo, accion, demora, intento, reintento in pendientes:
+        _programar_confirmacion(empleado, tipo, accion, demora=min(demora, 30), intento=intento, reintento=reintento)
+    reintentos = list(_cola_reintentos)
+    _cola_reintentos.clear()
+    for empleado, tipo, accion, reintento in reintentos:
+        _programar_reintento(empleado, tipo, accion, reintento)
 
 
 def _reconciliar_confirmaciones(empleados: List[Dict]) -> int:
