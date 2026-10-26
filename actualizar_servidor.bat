@@ -4,7 +4,8 @@ REM Actualiza una instalacion existente de GeoVic en el servidor.
 REM
 REM USO: extraer GeoVic-Portable.zip en una carpeta temporal y dar doble clic a ESTE archivo.
 REM Pregunta la carpeta del proyecto instalado (la recuerda: la proxima vez basta con Enter),
-REM copia el codigo nuevo encima, limpia restos de versiones anteriores y reinicia el programador.
+REM copia el codigo nuevo encima, limpia restos de versiones anteriores y reinicia el programador
+REM y el monitor web (ventana "Monitor GeoVictoria", http://127.0.0.1:8765).
 REM
 REM Conserva: .env, config\employees.json, config\festivos_adicionales.json, src\logs, .venv
 REM No requiere Administrador: el programador queda en una ventana de TU sesion (navegador visible).
@@ -78,6 +79,8 @@ echo [1/5] Deteniendo el programador...
 schtasks /end /tn "%TASK%" >nul 2>&1
 REM Solo procesos python cuya linea de comandos contiene programador.py; no toca otros python.
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'programador\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+REM El monitor (solo lectura) tambien se cierra: si no, seguiria sirviendo el codigo viejo y ocuparia el puerto.
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'monitor\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 ping -n 4 127.0.0.1 >nul
 if exist "%TARGET%\src\logs\programador.lock" del /F /Q "%TARGET%\src\logs\programador.lock"
 
@@ -163,9 +166,12 @@ echo [4/5] Iniciando el programador en una ventana nueva (navegador visible)...
 REM Igual que antes: ventana de consola propia, con el navegador visible en tu sesion.
 REM No se crea ni se modifica ninguna Tarea Programada.
 start "Programador GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" src\programador.py"
+REM Monitor web (solo lectura) en su propia ventana, sin abrir el navegador: http://127.0.0.1:8765
+start "Monitor GeoVictoria" /D "%TARGET%" cmd /k ""%PYTHON%" scripts\monitor.py"
 ping -n 8 127.0.0.1 >nul
 
 echo [5/5] Verificando...
+powershell -NoProfile -Command "$m = Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'monitor\.py' }; if ($m) { Write-Host '[OK] Monitor en http://127.0.0.1:8765' } else { Write-Host '[AVISO] No se detecta el monitor; abrelo con scripts\monitor.bat (el programador no depende de el).' }"
 powershell -NoProfile -Command "$p = Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'programador\.py' }; if ($p) { Write-Host ('[OK] Programador en ejecucion (PID ' + (($p | ForEach-Object ProcessId) -join ', ') + ')') } else { Write-Host '[WARN] No se detecta el proceso. Mira la ventana Programador GeoVictoria.'; exit 1 }"
 
 echo.
@@ -173,7 +179,8 @@ echo ================================================
 echo   ACTUALIZACION COMPLETADA
 echo ================================================
 echo.
-echo Deja abierta la ventana "Programador GeoVictoria" (puedes minimizarla, no cerrarla).
+echo Deja abiertas las ventanas "Programador GeoVictoria" y "Monitor GeoVictoria" (puedes minimizarlas, no cerrarlas).
+echo Monitor en vivo: http://127.0.0.1:8765
 echo Verifica con: %TARGET%\scripts\ver_estado.bat
 echo.
 pause
