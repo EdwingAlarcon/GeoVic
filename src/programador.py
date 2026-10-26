@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import date, datetime, time, timedelta
 from functools import partial
 from logging.handlers import RotatingFileHandler
@@ -18,12 +19,15 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src import bitacora
 from src.cache_estado import get_cache
 from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica
 from src.empleados import cargar_empleados, obtener_horario_dia
+from src.estado_monitor import confirmacion_de
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import run, verificar_estado
 
@@ -98,6 +102,24 @@ def _aplicar_offset(hora: int, minuto: int, offset_segundos: int):
 
 
 # ---------------------------------------------------------------------------
+# Estado compartido con el monitor (latido, plan horario) y confirmaciones
+# ---------------------------------------------------------------------------
+
+# Confirmación independiente: tras cada marcaje exitoso se vuelve a entrar al portal para comprobar
+# que el botón de esa acción ya no se ofrece. GEOVICTORIA_CONFIRMAR=0 la desactiva.
+CONFIRMAR = os.getenv("GEOVICTORIA_CONFIRMAR", "1").strip().lower() not in ("0", "false", "no")
+CONFIRMAR_DEMORA_SEG = int(os.getenv("GEOVICTORIA_CONFIRMAR_DEMORA", "90"))
+
+_scheduler: Optional[BlockingScheduler] = None  # lo fija main(); permite programar confirmaciones
+_cola_confirmaciones: list = []                 # confirmaciones pedidas antes de que exista el scheduler
+_PLAN: Dict = {}      # hora programada real (con escalonado) de cada empleado y día, para el monitor
+_NOMBRES: Dict = {}   # id -> nombre, para anotar eventos que solo conocen el id
+_INICIO = datetime.now().isoformat(timespec="seconds")
+_FASE = "arrancando"  # "activo" cuando el scheduler ya corre
+_ULTIMO_TICK: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Registro de ejecuciones — uno por empleado
 # ---------------------------------------------------------------------------
 
@@ -119,7 +141,8 @@ def leer_registro(emp_id: str) -> dict:
     return {}
 
 
-def guardar_registro(emp_id: str, tipo_marcaje: str, variacion_minutos: int = 0) -> None:
+def guardar_registro(emp_id: str, tipo_marcaje: str, variacion_minutos: int = 0, origen: str = "programador") -> None:
+    """Guarda el marcaje de hoy. origen: "programador" (hizo el clic) o "portal" (se detectó ya hecho)."""
     try:
         registro = leer_registro(emp_id)
         hoy = date.today().isoformat()
@@ -130,6 +153,7 @@ def guardar_registro(emp_id: str, tipo_marcaje: str, variacion_minutos: int = 0)
             "hora": ahora.isoformat(),
             "timestamp": ahora.timestamp(),
             "variacion_minutos": variacion_minutos,
+            "origen": origen,
         }
 
         # Mantener solo los últimos 30 días
@@ -138,6 +162,9 @@ def guardar_registro(emp_id: str, tipo_marcaje: str, variacion_minutos: int = 0)
 
         with open(_registro_path(emp_id), "w", encoding="utf-8") as f:
             json.dump(registro, f, indent=2, ensure_ascii=False)
+
+        bitacora.registrar("registro", {"id": emp_id, "nombre": _NOMBRES.get(emp_id)},
+                           tipo_marcaje=tipo_marcaje, origen=origen)
 
     except Exception as e:
         logger.error(f"[{emp_id}] Error guardando registro: {e}")
@@ -185,13 +212,14 @@ def verificar_estado_emp(emp_id: str, empleado: Dict) -> Optional[str]:
 # Alertas de fallo
 # ---------------------------------------------------------------------------
 
-def alertar_fallo(emp_nombre: str, tipo_marcaje: str) -> None:
+def alertar_fallo(emp_nombre: str, tipo_marcaje: str, detalle: str = "no ejecutado") -> None:
     """Registra un fallo en alertas.log para monitoreo externo."""
-    msg = f"{datetime.now().isoformat()} | ALERTA | {emp_nombre} | {tipo_marcaje} no ejecutado\n"
+    msg = f"{datetime.now().isoformat()} | ALERTA | {emp_nombre} | {tipo_marcaje} {detalle}\n"
     try:
         with open(alerta_file, "a", encoding="utf-8") as f:
             f.write(msg)
-        logger.error(f"🚨 ALERTA: [{emp_nombre}] {tipo_marcaje} — ver {alerta_file.name}")
+        bitacora.registrar("alerta", nombre=emp_nombre, mensaje=f"{tipo_marcaje} {detalle}")
+        logger.error(f"🚨 ALERTA: [{emp_nombre}] {tipo_marcaje} {detalle} — ver {alerta_file.name}")
     except Exception as e:
         logger.error(f"Error escribiendo alerta: {e}")
 
@@ -220,6 +248,56 @@ def _portal_refleja_marcaje_completado(tipo_marcaje: str, boton_disponible: Opti
         return True
 
     return False
+
+
+def _programar_confirmacion(empleado: Dict, tipo_marcaje: str, accion: str,
+                            demora: int = CONFIRMAR_DEMORA_SEG, intento: int = 1) -> None:
+    """Agenda la confirmación independiente de un marcaje (un segundo login al portal)."""
+    if not CONFIRMAR:
+        return
+    if _scheduler is None:  # marcaje hecho durante el arranque: se agenda cuando exista el scheduler
+        _cola_confirmaciones.append((empleado, tipo_marcaje, accion, demora, intento))
+        return
+    try:
+        _scheduler.add_job(
+            partial(confirmar_marcaje_emp, empleado, tipo_marcaje, accion, intento),
+            "date",
+            run_date=datetime.now(_scheduler.timezone) + timedelta(seconds=demora),
+            id=f"confirmar_{empleado['id']}_{tipo_marcaje}_{intento}",
+            name=f"[{empleado['nombre']}] Confirmar {tipo_marcaje} (intento {intento})",
+            replace_existing=True,
+        )
+    except Exception as e:
+        logger.warning(f"[{empleado['nombre']}] No se pudo agendar la confirmación de {tipo_marcaje}: {e}")
+
+
+def confirmar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, intento: int = 1) -> None:
+    """Segundo login independiente: comprueba en el portal que el marcaje realmente quedó.
+
+    No reintenta el marcaje (podría duplicarlo): solo deja constancia y alerta si no se confirma.
+    """
+    emp_id, emp_nombre = empleado["id"], empleado["nombre"]
+    tag = f"[{emp_nombre}]"
+    get_cache().invalidar(f"estado_{emp_id}")
+    try:
+        boton = asyncio.run(verificar_estado(empleado=empleado))
+    except Exception as e:
+        logger.error(f"{tag} Error confirmando {tipo_marcaje}: {e}")
+        boton = None
+
+    confirmada = confirmacion_de(accion, boton)
+    bitacora.registrar("confirmacion", empleado, accion=accion, tipo_marcaje=tipo_marcaje,
+                       confirmada=confirmada, boton=boton, intento=intento)
+
+    if confirmada is True:
+        logger.info(f"{tag} ✅ {tipo_marcaje} CONFIRMADO por el portal (ahora ofrece '{boton}')")
+    elif confirmada is False:
+        logger.error(f"{tag} ❌ {tipo_marcaje} NO confirmado: el portal sigue ofreciendo '{boton}'")
+        alertar_fallo(emp_nombre, tipo_marcaje, "NO CONFIRMADO por el portal")
+    else:
+        logger.warning(f"{tag} ⚠️ Confirmación de {tipo_marcaje} no concluyente (botón: {boton})")
+        if intento < 2:
+            _programar_confirmacion(empleado, tipo_marcaje, accion, demora=300, intento=intento + 1)
 
 
 def ejecutar_marcaje_emp(
@@ -291,13 +369,14 @@ def ejecutar_marcaje_emp(
             tipo_real = determinar_tipo_marcaje(accion, hoy.weekday())
             guardar_registro(emp_id, tipo_real, variacion_minutos)
             logger.info(f"{tag} ✅ Marcaje completado: {accion} — guardado como '{tipo_real}'")
+            _programar_confirmacion(empleado, tipo_real, accion)
         else:
             # Revalidar estado del portal para evitar falsos negativos por ejecuciones
             # concurrentes o marcajes manuales ya realizados.
             get_cache().invalidar(f"estado_{emp_id}")
             boton = verificar_estado_emp(emp_id, empleado)
             if _portal_refleja_marcaje_completado(tipo_marcaje, boton):
-                guardar_registro(emp_id, tipo_marcaje, variacion_minutos)
+                guardar_registro(emp_id, tipo_marcaje, variacion_minutos, origen="portal")
                 logger.info(
                     f"{tag} ℹ️ Marcaje ya reflejado en portal (botón: {boton}) — "
                     f"sincronizado como '{tipo_marcaje}'"
@@ -345,7 +424,7 @@ def salida_semana_emp(empleado: Dict) -> None:
         boton = verificar_estado_emp(emp_id, empleado)
         if boton == "Salida":
             logger.info(f"[{emp_nombre}] Entrada detectada en GeoVictoria — sincronizando registro local")
-            guardar_registro(emp_id, tipo_entrada)
+            guardar_registro(emp_id, tipo_entrada, origen="portal")
         else:
             logger.warning(f"[{emp_nombre}] Salida omitida — no hay entrada previa registrada")
             return
@@ -378,7 +457,7 @@ def salida_sabado_emp(empleado: Dict) -> None:
         boton = verificar_estado_emp(emp_id, empleado)
         if boton == "Salida":
             logger.info(f"[{emp_nombre}] Entrada sábado detectada en GeoVictoria — sincronizando")
-            guardar_registro(emp_id, tipo_entrada)
+            guardar_registro(emp_id, tipo_entrada, origen="portal")
         else:
             logger.warning(f"[{emp_nombre}] Salida sábado omitida — no hay entrada previa")
             return
@@ -431,7 +510,7 @@ def verificar_pendientes_emp(empleado: Dict) -> None:
         boton = verificar_estado_emp(emp_id, empleado)
         if boton == "Salida":
             logger.info(f"{tag} {tipo_entrada} ya marcado manualmente — sincronizando registro")
-            guardar_registro(emp_id, tipo_entrada)
+            guardar_registro(emp_id, tipo_entrada, origen="portal")
         elif hora_actual <= time(12, 0):
             logger.warning(f"{tag} PENDIENTE: {tipo_entrada} — ejecutando ahora")
             ejecutar_marcaje_emp(empleado, tipo_entrada, validar_horario=False)
@@ -444,7 +523,7 @@ def verificar_pendientes_emp(empleado: Dict) -> None:
         if not ya_se_ejecuto_hoy(emp_id, tipo_entrada):
             boton = verificar_estado_emp(emp_id, empleado)
             if boton == "Salida":
-                guardar_registro(emp_id, tipo_entrada)
+                guardar_registro(emp_id, tipo_entrada, origen="portal")
             else:
                 logger.warning(f"{tag} Salida omitida — no hay entrada previa")
                 return
@@ -516,6 +595,9 @@ def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict, e
             coalesce=True,
         )
         logger.info(f"  {tag} ✓ Entrada {dias_str}: {feh:02d}:{fem:02d}:{fes:02d} | Salida: {fsh:02d}:{fsm:02d}:{fss:02d}")
+        for dia in dias_ap:
+            _PLAN.setdefault(emp_id, {})[dia] = {
+                "entrada": f"{feh:02d}:{fem:02d}:{fes:02d}", "salida": f"{fsh:02d}:{fsm:02d}:{fss:02d}"}
 
     # --- Sábado (opcional) ---
     if h.get("trabaja_sabados", True):
@@ -538,6 +620,8 @@ def configurar_trabajos_empleado(scheduler: BlockingScheduler, empleado: Dict, e
             max_instances=1,
             coalesce=True,
         )
+        _PLAN.setdefault(emp_id, {})["sat"] = {
+            "entrada": f"{feh_s:02d}:{fem_s:02d}:{fes_s:02d}", "salida": f"{fsh_s:02d}:{fsm_s:02d}:{fss_s:02d}"}
         logger.info(f"  {tag} ✓ Entrada/Salida Sábado configurados")
 
     # Verificación periódica escalonada dentro del minuto :05 (10s entre empleados)
@@ -596,6 +680,42 @@ def eliminar_lock_file() -> None:
 # Listener de jobs
 # ---------------------------------------------------------------------------
 
+def _tick_scheduler() -> None:
+    """Job periódico: prueba de que el scheduler y su pool de hilos siguen respondiendo."""
+    global _ULTIMO_TICK
+    _ULTIMO_TICK = datetime.now().isoformat(timespec="seconds")
+
+
+def _iniciar_latido() -> None:
+    """Hilo que escribe el latido cada 20 s desde el arranque (también mientras revisa pendientes)."""
+    def bucle() -> None:
+        espera = threading.Event()
+        while True:
+            bitacora.escribir_latido(_INICIO, _FASE, _PLAN, _ULTIMO_TICK)
+            espera.wait(20)
+
+    threading.Thread(target=bucle, name="latido", daemon=True).start()
+
+
+def _preparar_scheduler(scheduler: BlockingScheduler) -> None:
+    """Deja el scheduler disponible para agendar confirmaciones y añade el job de latido."""
+    global _scheduler
+    _scheduler = scheduler
+    scheduler.add_job(_tick_scheduler, IntervalTrigger(seconds=20), id="tick_scheduler",
+                      name="Latido del scheduler", max_instances=1, coalesce=True)
+    pendientes = list(_cola_confirmaciones)
+    _cola_confirmaciones.clear()
+    for empleado, tipo, accion, demora, intento in pendientes:
+        _programar_confirmacion(empleado, tipo, accion, demora=min(demora, 30), intento=intento)
+
+
+def _marcar_fase_activa() -> None:
+    global _FASE
+    _FASE = "activo"
+    _tick_scheduler()
+    bitacora.escribir_latido(_INICIO, _FASE, _PLAN, _ULTIMO_TICK)
+
+
 def job_listener(event) -> None:
     if event.exception:
         logger.error(f"❌ Error en job '{event.job_id}': {event.exception}")
@@ -616,6 +736,8 @@ def main() -> None:
 
     crear_lock_file()
     atexit.register(eliminar_lock_file)
+    _iniciar_latido()
+    atexit.register(lambda: bitacora.registrar("programador_fin"))
 
     logger.info("\n" + "=" * 80)
     logger.info("🚀 INICIANDO PROGRAMADOR GEOVICTORIA — SOPORTE MULTI-EMPLEADO")
@@ -629,6 +751,8 @@ def main() -> None:
         sys.exit(1)
 
     logger.info(f"👥 Empleados activos: {len(empleados)}")
+    _NOMBRES.update({e["id"]: e["nombre"] for e in empleados})
+    bitacora.registrar("programador_inicio", empleados=len(empleados))
     for emp in empleados:
         h = emp["horario"]
         logger.info(
@@ -657,6 +781,7 @@ def main() -> None:
         job_defaults={"misfire_grace_time": 300},
     )
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+    _preparar_scheduler(scheduler)
 
     for idx, emp in enumerate(empleados):
         try:
@@ -678,6 +803,7 @@ def main() -> None:
 
     logger.info(f"\n⏰ Programador activo con {len(empleados)} empleado(s). Ctrl+C para detener.\n")
 
+    _marcar_fase_activa()
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

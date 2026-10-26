@@ -42,6 +42,7 @@ pytest tests/test_empleados.py
 - `diagnostico_sistema.bat` — scheduler instances, lock, registry, recent logs and today's alerts per user
 - `probar_login.bat [id|name]` — test ONE employee's login without marking (works for disabled employees too) and explain the failure (bad credentials, locked account, password change, 2FA…); logic lives in `src/diagnostico_login.py`
 - `ver_log_en_vivo.bat` — follow the scheduler log live
+- `monitor.bat` — read-only live web monitor (`http://127.0.0.1:8765`): per-employee status, scheduler heartbeat, instance count, alerts. Logic in `src/estado_monitor.py` (pure, tested); server in `scripts/monitor.py`; never serves credentials
 - `actualizar_servidor.bat` (project root) — update an installed server from the extracted zip
 
 ## Architecture
@@ -59,6 +60,8 @@ pytest tests/test_empleados.py
 - Schedules 4–5 jobs per employee: entrada L-V, salida L-V, entrada sábado, salida sábado, plus an hourly `verificar_pendientes_emp` that catches missed markings (e.g., PC started late).
 - Enforces a **single instance per machine** via `src/control_concurrencia.py` (named Windows mutex; `flock` on POSIX). Deleting the lock file does not allow a second instance, and the exclusion is released automatically if the process dies, so no manual cleanup is needed after a crash or reboot. A second launch exits with "Programador ya en ejecución". `src/logs/programador.lock` only holds the PID, for information.
 - The thread pool has 20 workers and jobs get `misfire_grace_time=300`, so jobs waiting for a browser slot are not dropped as missed.
+- **Independent confirmation**: after every successful marking it schedules `confirmar_marcaje_emp` (~90 s later, `GEOVICTORIA_CONFIRMAR_DEMORA`), which logs in a second time and checks that the portal no longer offers that action's button (`confirmacion_de`). If the portal still offers it, it writes an alert ("NO CONFIRMADO por el portal"). It never retries the marking (could duplicate it). `GEOVICTORIA_CONFIRMAR=0` disables it.
+- **Heartbeat**: a thread writes `src/logs/latido.json` every 20 s (process alive) and an interval job updates `tick_scheduler` (scheduler responding), plus the real scheduled times (`plan`). `src/bitacora.py` appends structured events (login, marcaje, registro, confirmacion, alerta…) to `eventos_YYYYMMDD.jsonl`; recording never raises and never stores credentials.
 - Salida jobs check that the corresponding entrada was already registered; if not, they call `verificar_estado` to detect entries made outside the scheduler (manual or via portal).
 - `HorarioConfig.COOLDOWN_ENTRE_MARCAJES = 300` — minimum seconds between two markings for the same employee.
 - Validation window for scheduled jobs: ±30 minutes around the configured time; markings outside that window are skipped.
@@ -85,6 +88,7 @@ pytest tests/test_empleados.py
 - `programador_YYYYMMDD.log` — scheduler event log.
 - `registro_{emp_id}.json` / `registro_ejecuciones.json` — JSON registry tracking which markings were executed today (last 30 days). Used to prevent double-markings.
 - `alertas.log` — append-only file written when a marking fails; useful for external monitoring.
+- `eventos_YYYYMMDD.jsonl` — structured event journal (one JSON per line, fsync'd); source of truth for the monitor. `latido.json` — heartbeat + today's real schedule. Each mark in `registro_{emp_id}.json` carries `"origen"`: `"programador"` (it clicked) or `"portal"` (already done, detected from the portal).
 - `programador.lock` — PID of the running scheduler (informational). Stale locks are harmless: the real single-instance guard is the OS-level lock.
 
 ### Key Constraints

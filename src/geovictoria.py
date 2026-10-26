@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -15,9 +16,15 @@ try:
 except ImportError:  # ejecución directa: python src/geovictoria.py
     from control_concurrencia import CupoNavegador, maximo_navegadores_desde_entorno
 
+try:
+    from src.bitacora import registrar
+except ImportError:  # ejecución directa: python src/geovictoria.py
+    from bitacora import registrar
+
 
 class Config:
-    LOGIN_URL = "https://clients.geovictoria.com/account/login?ReturnUrl=%2f"
+    # GEOVICTORIA_LOGIN_URL permite apuntar a un portal falso en pruebas
+    LOGIN_URL = os.getenv("GEOVICTORIA_LOGIN_URL", "https://clients.geovictoria.com/account/login?ReturnUrl=%2f")
     IFRAME_DOMAIN = "gvportal.geovictoria.com"
     IFRAME_TIMEOUT = 30000
     BUTTON_TIMEOUT = 5000
@@ -127,15 +134,21 @@ async def wait_for_iframe(page, tag: str = "", max_retries: int = 2):
     return None
 
 
-async def login(page, usuario: str, password: str, tag: str = "") -> bool:
-    """Realiza el login usando selectores configurables."""
+async def login(page, usuario: str, password: str, tag: str = "", empleado: Optional[Dict] = None) -> bool:
+    """Realiza el login usando selectores configurables y deja el resultado en la bitácora."""
+    inicio = time.monotonic()
+
+    def _resultado(ok: bool, motivo: Optional[str] = None) -> bool:
+        registrar("login", empleado, ok=ok, ms=int((time.monotonic() - inicio) * 1000), motivo=motivo)
+        return ok
+
     try:
         logger.debug(f"{tag}Navegando a login...")
         await page.goto(Config.LOGIN_URL, wait_until="domcontentloaded")
 
         if "browsernotsupported" in page.url:
             logger.error(f"{tag}❌ GeoVictoria detectó navegador no soportado")
-            return False
+            return _resultado(False, "navegador_no_soportado")
 
         await page.fill(_SEL["login"]["username"], usuario)
         await page.fill(_SEL["login"]["password"], password)
@@ -145,17 +158,17 @@ async def login(page, usuario: str, password: str, tag: str = "") -> bool:
 
         if "browsernotsupported" in page.url:
             logger.error(f"{tag}❌ Redirigido a browsernotsupported tras login")
-            return False
+            return _resultado(False, "navegador_no_soportado")
 
         logger.debug(f"{tag}✅ Login exitoso")
-        return True
+        return _resultado(True)
 
     except PlaywrightTimeoutError:
         logger.error(f"{tag}❌ Timeout en login - Verifique credenciales y conexión")
-        return False
+        return _resultado(False, "timeout")
     except Exception as e:
         logger.error(f"{tag}❌ Error en login: {e}")
-        return False
+        return _resultado(False, f"error: {(str(e).splitlines() or [''])[0][:120]}")
 
 
 async def verificar_boton_disponible(target_frame, tag: str = "") -> Optional[str]:
@@ -254,7 +267,7 @@ async def verificar_estado(empleado: Optional[Dict] = None) -> Optional[str]:
 
         async with _cupo_navegador.reservar(tag), async_playwright() as p:
             browser = await p.chromium.launch(
-                headless=False,
+                headless=Config.HEADLESS,
                 args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-sandbox"],
             )
             context = await browser.new_context(**_crear_contexto_browser())
@@ -264,14 +277,17 @@ async def verificar_estado(empleado: Optional[Dict] = None) -> Optional[str]:
             page = await context.new_page()
 
             try:
-                if not await login(page, usuario, password, tag=tag):
+                if not await login(page, usuario, password, tag=tag, empleado=empleado):
                     return None
 
                 target_frame = await wait_for_iframe(page, tag=tag, max_retries=Config.MAX_RETRIES)
                 if not target_frame:
+                    registrar("estado_portal", empleado, boton=None, motivo="iframe_no_encontrado")
                     return None
 
-                return await verificar_boton_disponible(target_frame, tag=tag)
+                boton = await verificar_boton_disponible(target_frame, tag=tag)
+                registrar("estado_portal", empleado, boton=boton)
+                return boton
             finally:
                 await browser.close()
 
@@ -313,22 +329,31 @@ async def run(accion_esperada: Optional[str] = None, empleado: Optional[Dict] = 
             page = await context.new_page()
 
             try:
-                if not await login(page, usuario, password, tag=tag):
+                if not await login(page, usuario, password, tag=tag, empleado=empleado):
                     logger.error(f"{tag}❌ Fallo en login")
+                    registrar("marcaje", empleado, esperada=accion_esperada, accion=None,
+                              resultado="no_realizado", motivo="login_fallido")
                     return None
 
                 target_frame = await wait_for_iframe(page, tag=tag, max_retries=Config.MAX_RETRIES)
                 if not target_frame:
                     logger.error(f"{tag}❌ No se encontró el iframe")
+                    registrar("marcaje", empleado, esperada=accion_esperada, accion=None,
+                              resultado="no_realizado", motivo="iframe_no_encontrado")
                     return None
 
                 if accion_esperada:
                     boton_disponible = await verificar_boton_disponible(target_frame, tag=tag)
                     if boton_disponible != accion_esperada:
                         logger.warning(f"{tag}⚠️ Validación fallida: esperado='{accion_esperada}', disponible='{boton_disponible or 'Ninguno'}' - No se ejecutará")
+                        registrar("marcaje", empleado, esperada=accion_esperada, accion=None, resultado="no_realizado",
+                                  motivo=f"el_portal_ofrece_{boton_disponible or 'ningun_boton'}")
                         return None
 
                 accion = await marcar_asistencia(target_frame, tag=tag)
+                registrar("marcaje", empleado, esperada=accion_esperada, accion=accion,
+                          resultado="ok" if accion else "no_realizado",
+                          motivo=None if accion else "sin_botones_o_sin_confirmar")
 
                 if accion:
                     logger.info(f"{tag}✅ MARCAJE EXITOSO: {accion} | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -345,6 +370,9 @@ async def run(accion_esperada: Optional[str] = None, empleado: Optional[Dict] = 
         logger.error(f"{tag}❌ Error de configuración: {e}")
     except Exception as e:
         logger.error(f"{tag}❌ Error inesperado: {e}", exc_info=True)
+        if not accion:
+            registrar("marcaje", empleado, esperada=accion_esperada, accion=None, resultado="no_realizado",
+                      motivo=f"error: {(str(e).splitlines() or [''])[0][:120]}")
 
     return accion
 
