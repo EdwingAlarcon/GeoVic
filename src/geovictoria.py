@@ -170,15 +170,34 @@ async def verificar_boton_disponible(target_frame, tag: str = "") -> Optional[st
 
 
 async def marcar_asistencia(target_frame, tag: str = "") -> Optional[str]:
-    """Ejecuta el marcaje de entrada o salida."""
+    """Ejecuta el marcaje de entrada o salida y confirma que el portal lo registró."""
     try:
         btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
         await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
         logger.info(f"{tag}Haciendo clic en 'Marcar Entrada'...")
         await btn.click(force=True)
-        await asyncio.sleep(1)
+        if not await _confirmar_marcaje(btn, "Salida", tag):
+            return None
         logger.info(f"{tag}✅ Marcaje de Entrada realizado")
         return "Entrada"
+
+CONFIRMACION_TIMEOUT = 15000
+
+
+async def _confirmar_marcaje(btn, nombre: str, tag: str = "") -> bool:
+    """Espera a que el botón pulsado desaparezca: prueba de que el portal registró el marcaje.
+
+    Sin esto el navegador (sobre todo en headless) se cierra antes de que la petición
+    termine y el clic se pierde aunque el log diga que fue exitoso.
+    """
+    try:
+        await btn.first.wait_for(timeout=CONFIRMACION_TIMEOUT, state="hidden")
+        await asyncio.sleep(2)
+        return True
+    except PlaywrightTimeoutError:
+        logger.error(f"{tag}❌ El portal no confirmó el marcaje de {nombre}: el botón sigue visible")
+        return False
+
 
     except PlaywrightTimeoutError:
         pass
@@ -188,7 +207,8 @@ async def marcar_asistencia(target_frame, tag: str = "") -> Optional[str]:
         await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
         logger.info(f"{tag}Haciendo clic en 'Marcar Salida'...")
         await btn.click(force=True)
-        await asyncio.sleep(1)
+        if not await _confirmar_marcaje(btn, "Entrada", tag):
+            return None
         logger.info(f"{tag}✅ Marcaje de Salida realizado")
         return "Salida"
 
