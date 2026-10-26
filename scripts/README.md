@@ -12,6 +12,7 @@ Doble clic en el `.bat` que necesites. Todos usan el Python del entorno virtual 
 | `ver_estado.bat` | Muestra qué marcajes se registraron hoy |
 | `ver_log_en_vivo.bat` | Sigue el log del programador en tiempo real |
 | `diagnostico_sistema.bat` | Instancias del programador, lock, registro, logs recientes y **alertas de hoy por usuario** |
+| `probar_login.bat` | Prueba el login de **un** empleado (también desactivado), **sin marcar**, y explica por qué falla: credenciales mal copiadas, contraseña rechazada, cuenta bloqueada, cambio de clave, segundo factor… Guarda una captura. Uso: `probar_login.bat emp15` |
 
 ## Marcaje manual y recuperación
 

@@ -40,6 +40,7 @@ pytest tests/test_empleados.py
 - `ejecutar_manual.bat` — one-off marking
 - `ver_estado.bat` — show current scheduler state (calls `scripts/verificar_estado.py`)
 - `diagnostico_sistema.bat` — scheduler instances, lock, registry, recent logs and today's alerts per user
+- `probar_login.bat [id|name]` — test ONE employee's login without marking (works for disabled employees too) and explain the failure (bad credentials, locked account, password change, 2FA…); logic lives in `src/diagnostico_login.py`
 - `ver_log_en_vivo.bat` — follow the scheduler log live
 - `actualizar_servidor.bat` (project root) — update an installed server from the extracted zip
 
