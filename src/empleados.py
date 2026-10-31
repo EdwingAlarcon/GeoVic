@@ -4,8 +4,9 @@ Soporta modo individual (.env) y multi-empleado (config/employees.json).
 """
 import json
 import os
+from datetime import date
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -71,6 +72,69 @@ def obtener_horario_dia(horario: Dict, dia_semana: int) -> Dict:
             break
 
     return base
+
+
+def _fecha_iso(valor) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(valor))
+    except (ValueError, TypeError):
+        return None
+
+
+def _rango_ausencia(ausencia) -> Optional[Tuple[date, Optional[date], str]]:
+    """(desde, hasta, motivo) de una entrada de "ausencias", o None si está mal escrita.
+
+    "hasta" es opcional (licencia sin fecha de fin: hasta = None); si se escribe debe ser una fecha
+    válida y no anterior a "desde".
+    """
+    if not isinstance(ausencia, dict):
+        return None
+    desde = _fecha_iso(ausencia.get("desde"))
+    if desde is None:
+        return None
+    hasta = None
+    if ausencia.get("hasta"):
+        hasta = _fecha_iso(ausencia["hasta"])
+        if hasta is None or hasta < desde:
+            return None
+    return desde, hasta, str(ausencia.get("motivo") or "ausencia")
+
+
+def ausencia_en(empleado: Dict, dia: date) -> Optional[str]:
+    """Motivo si el empleado está exento de marcar ese día ("ausencias" en employees.json), o None.
+
+    Las entradas mal escritas se ignoran (ver ausencias_invalidas): es preferible marcar de más a
+    que un error de digitación deje a alguien sin marcar o impida arrancar el programador.
+    """
+    ausencias = empleado.get("ausencias")
+    for ausencia in ausencias if isinstance(ausencias, list) else []:
+        rango = _rango_ausencia(ausencia)
+        if rango and rango[0] <= dia and (rango[1] is None or dia <= rango[1]):
+            return rango[2]
+    return None
+
+
+def ausencias_invalidas(empleado: Dict) -> List[str]:
+    """Entradas de "ausencias" que se ignoran por estar mal escritas (para avisar al arrancar)."""
+    ausencias = empleado.get("ausencias")
+    if ausencias is None:
+        return []
+    if not isinstance(ausencias, list):
+        return [json.dumps(ausencias, ensure_ascii=False)]
+    return [json.dumps(a, ensure_ascii=False) for a in ausencias if _rango_ausencia(a) is None]
+
+
+def ausencia_vigente(empleado: Dict, dia: date) -> Optional[str]:
+    """Como ausencia_en, pero relee employees.json: añadir unas vacaciones no exige reiniciar el
+    programador. Si el archivo no se puede leer se usa lo cargado al arrancar."""
+    try:
+        with open(EMPLOYEES_FILE, "r", encoding="utf-8") as f:
+            for e in json.load(f).get("employees", []):
+                if e.get("id") == empleado.get("id"):
+                    return ausencia_en(e, dia)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return ausencia_en(empleado, dia)
 
 
 def _validar_empleado(emp: Dict) -> None:

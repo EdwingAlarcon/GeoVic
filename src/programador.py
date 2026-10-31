@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src import bitacora
 from src.cache_estado import get_cache
 from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica, desactivar_seleccion_consola
-from src.empleados import cargar_empleados, obtener_horario_dia
+from src.empleados import ausencia_vigente, ausencias_invalidas, cargar_empleados, obtener_horario_dia
 from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import Config, run, verificar_estado
@@ -383,6 +383,21 @@ def _programar_reintento(empleado: Dict, tipo_marcaje: str, accion: str, reinten
     return True
 
 
+def _ausente_hoy(empleado: Dict, registrar: bool = True) -> bool:
+    """¿Está exento de marcar hoy ("ausencias" en employees.json: vacaciones, licencia…)?
+
+    Lee el archivo en cada llamada, así que unas vacaciones nuevas valen sin reiniciar. `registrar`
+    deja un aviso en la bitácora; el chequeo horario lo apaga para no repetirlo cada hora.
+    """
+    motivo = ausencia_vigente(empleado, date.today())
+    if motivo is None:
+        return False
+    logger.info(f"[{empleado['nombre']}] AUSENTE ({motivo}) — no se marca hoy")
+    if registrar:
+        bitacora.registrar("aviso", empleado, mensaje=f"ausente hoy ({motivo}): no se marca")
+    return True
+
+
 def reintentar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, reintento: int) -> None:
     """Vuelve a intentar un marcaje que el portal no registró.
 
@@ -392,7 +407,7 @@ def reintentar_marcaje_emp(empleado: Dict, tipo_marcaje: str, accion: str, reint
     emp_id, emp_nombre = empleado["id"], empleado["nombre"]
     tag = f"[{emp_nombre}]"
     hoy = date.today()
-    if es_festivo(hoy) or hoy.weekday() == 6:
+    if es_festivo(hoy) or hoy.weekday() == 6 or _ausente_hoy(empleado, registrar=False):
         return
     get_cache().invalidar(f"estado_{emp_id}")
     logger.warning(f"{tag} 🔁 Reintento {reintento}/{REINTENTOS_MAX} de {tipo_marcaje}")
@@ -456,6 +471,10 @@ def ejecutar_marcaje_emp(
 
     if hoy.weekday() == 6:
         logger.warning(f"{tag} HOY ES DOMINGO — omitiendo")
+        logger.info("=" * 80)
+        return None
+
+    if _ausente_hoy(empleado):
         logger.info("=" * 80)
         return None
 
@@ -543,6 +562,8 @@ def salida_semana_emp(empleado: Dict) -> None:
     if ya_se_ejecuto_hoy(emp_id, tipo_salida):
         logger.info(f"[{emp_nombre}] {tipo_salida} ya ejecutada hoy — omitiendo")
         return
+    if _ausente_hoy(empleado):  # antes de verificar_estado: no hace falta ni abrir el portal
+        return
 
     if not ya_se_ejecuto_hoy(emp_id, tipo_entrada):
         get_cache().invalidar(f"estado_{emp_id}")
@@ -575,6 +596,8 @@ def salida_sabado_emp(empleado: Dict) -> None:
 
     if ya_se_ejecuto_hoy(emp_id, tipo_salida):
         logger.info(f"[{emp_nombre}] {tipo_salida} ya ejecutada hoy — omitiendo")
+        return
+    if _ausente_hoy(empleado):
         return
 
     if not ya_se_ejecuto_hoy(emp_id, tipo_entrada):
@@ -610,6 +633,8 @@ def verificar_pendientes_emp(empleado: Dict) -> None:
         return
     if dia_semana == 6:
         logger.info(f"{tag} Domingo — sin pendientes")
+        return
+    if _ausente_hoy(empleado, registrar=False):
         return
     if dia_semana == 5 and not horario.get("trabaja_sabados", True):
         logger.info(f"{tag} No trabaja sábados — omitiendo")
@@ -920,6 +945,10 @@ def main() -> None:
             f"L-V {h['entrada_semana_hora']:02d}:{h['entrada_semana_minuto']:02d}/"
             f"{h['salida_semana_hora']:02d}:{h['salida_semana_minuto']:02d}"
         )
+        for mala in ausencias_invalidas(emp):
+            logger.warning(f"  ⚠️ [{emp['id']}] ausencia ignorada por estar mal escrita: {mala} "
+                           f"(formato: {{\"desde\": \"AAAA-MM-DD\", \"hasta\": \"AAAA-MM-DD\", \"motivo\": \"…\"}})")
+            bitacora.registrar("aviso", emp, mensaje=f"ausencia mal escrita, se ignora: {mala}")
 
     listar_festivos_año(datetime.now().year)
 

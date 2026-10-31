@@ -58,7 +58,7 @@ def contar_instancias() -> Optional[int]:
 def _sin_credenciales(empleados: List[Dict]) -> List[Dict]:
     """Solo lo necesario para el monitor: jamás usuario ni contraseña."""
     return [{"id": e.get("id"), "nombre": e.get("nombre"), "activo": e.get("activo", True),
-             "horario": e.get("horario") or {}} for e in empleados]
+             "horario": e.get("horario") or {}, "ausencias": e.get("ausencias") or []} for e in empleados]
 
 
 _ULTIMO_BUENO: Dict[str, Dict] = {}

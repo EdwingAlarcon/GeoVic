@@ -27,7 +27,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from src import bitacora
-from src.empleados import cargar_empleados
+from src.empleados import ausencia_vigente, cargar_empleados
 from src.estado_monitor import confirmacion_de
 from src.festivos_colombia import es_festivo
 from src.geovictoria import run, verificar_estado
@@ -129,6 +129,8 @@ def main(argumentos: List[str]) -> int:
         if not emp:
             print(f"✖ {emp_id}: no existe o está desactivado")
             fallos += 1
+        elif (motivo := ausencia_vigente(emp, hoy)) is not None:
+            print(f"⏭ {emp['nombre']}: ausente hoy ({motivo}); no se marca")
         elif esta_ocupado(bitacora.leer_eventos(), emp_id, datetime.now(), os.getpid()):
             print(f"⏭ {emp['nombre']}: otro proceso lo está atendiendo ahora; se omite")
         else:

@@ -15,7 +15,7 @@ import re
 from datetime import datetime, time
 from typing import Dict, List, Optional, Tuple
 
-from src.empleados import _HORARIO_DEFAULT, obtener_horario_dia
+from src.empleados import _HORARIO_DEFAULT, ausencia_en, obtener_horario_dia
 
 GRACIA_SEG = 180        # tras la hora programada, tolerancia antes de dar el marcaje por vencido
 CONFIRMANDO_SEG = 300   # tras marcar, ventana en que "esperando confirmación" es normal
@@ -216,6 +216,7 @@ def calcular_estado(
 
     resumen = {"empleados": 0, "entrada": {}, "salida": {}}
     hay_jornada = False
+    ausentes: List[str] = []
 
     for emp in empleados:
         emp_id = emp.get("id")
@@ -231,6 +232,15 @@ def calcular_estado(
         }
         if not emp.get("activo", True):
             fila["dia"] = "desactivado"
+            filas.append(fila)
+            continue
+
+        motivo_ausencia = ausencia_en(emp, ahora.date())
+        if motivo_ausencia and ahora.weekday() != 6 and not festivo:
+            # Exento de marcar hoy: no cuenta como jornada, así no salta VENCIDA ni "Marcar pendientes"
+            fila["dia"] = f"ausente ({motivo_ausencia})"
+            fila["ausencia"] = motivo_ausencia
+            ausentes.append(f"{emp.get('nombre')} ({motivo_ausencia})")
             filas.append(fila)
             continue
 
@@ -255,6 +265,10 @@ def calcular_estado(
                     and fila["entrada"]["estado"] in ("pendiente", "vencida")):
                 subir("aviso", f"{emp.get('nombre')}: su último login falló ({fila['login']['motivo'] or 'sin detalle'})")
         filas.append(fila)
+
+    if ausentes:
+        # Visible a propósito: un error de fecha en "ausencias" dejaría a alguien sin marcar
+        subir("ok", "Ausentes hoy (no se les marca): " + ", ".join(ausentes))
 
     programador = _bloque_programador(ahora, latido, eventos, instancias)
     if not programador["vivo"]:

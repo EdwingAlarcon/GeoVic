@@ -34,7 +34,11 @@
         "salida_sabado_hora": 13,
         "salida_sabado_minuto": 0,
         "trabaja_sabados": false
-      }
+      },
+      "ausencias": [
+        {"desde": "2026-11-10", "hasta": "2026-11-21", "motivo": "vacaciones"},
+        {"desde": "2026-12-01", "motivo": "licencia (sin fecha de fin)"}
+      ]
     },
     {
       "id": "emp3",
