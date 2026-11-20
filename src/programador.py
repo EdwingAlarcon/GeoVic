@@ -11,7 +11,6 @@ import sys
 import threading
 from datetime import date, datetime, time, timedelta
 from functools import partial
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -30,6 +29,7 @@ from src.empleados import ausencia_vigente, ausencias_invalidas, cargar_empleado
 from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import Config, run, verificar_estado
+from src.log_diario import ArchivoDiario, StderrDiario
 from src.reintentos import demora_reintento_desde_entorno, puede_reintentar, reintentos_desde_entorno
 
 # ---------------------------------------------------------------------------
@@ -46,11 +46,12 @@ alerta_file = log_dir / "alertas.log"
 # Logging con rotación (5 MB x 5 archivos)
 # ---------------------------------------------------------------------------
 
-log_file = log_dir / f"programador_{datetime.now().strftime('%Y%m%d')}.log"
-
 _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-_fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8", mode="a")
+# Un archivo por día sin renombrar (ver log_diario): RotatingFileHandler fallaba en Windows al rotar.
+# La limpieza de logs viejos se repite en cada cambio de día (el programador vive semanas).
+_fh = ArchivoDiario(log_dir, "programador", al_cambiar_dia=lambda: _limpiar_logs_viejos(dias=14))
 _fh.setFormatter(_fmt)
+log_file = Path(_fh.baseFilename)  # archivo de hoy al arrancar (informativo)
 # Forzar UTF-8 en la consola para que los emojis no rompan en Windows (cp1252)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 _sh = logging.StreamHandler(sys.stdout)
@@ -907,11 +908,9 @@ def job_listener(event) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Redirigir stderr al log para capturar excepciones no manejadas
-    try:
-        sys.stderr = open(log_file, "a", encoding="utf-8", errors="replace")
-    except Exception:
-        pass  # Si falla, seguir con stderr original
+    # stderr a su propio archivo diario para capturar excepciones no manejadas. NO al mismo archivo que
+    # el log: tenerlo abierto dos veces impedía rotarlo en Windows (WinError 32 en cada línea).
+    sys.stderr = StderrDiario(log_dir, "errores_programador")
 
     desactivar_seleccion_consola()  # un clic en la ventana no debe congelar el scheduler
     crear_lock_file()
@@ -1013,7 +1012,7 @@ if __name__ == "__main__":
     except Exception as e:
         # Último recurso: loguear al archivo directamente
         try:
-            with open(log_file, "a", encoding="utf-8") as f:
+            with open(_fh.baseFilename, "a", encoding="utf-8") as f:
                 import traceback
                 f.write(f"\n{'='*80}\n")
                 f.write(f"EXCEPCION FATAL EN main():\n")

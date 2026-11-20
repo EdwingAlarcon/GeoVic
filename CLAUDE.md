@@ -56,6 +56,7 @@ pytest tests/test_empleados.py
 - `verificar_estado(empleado)` — Same login flow but only checks which button is visible, without clicking. Used by the scheduler to sync state.
 - `Config` class — Tune timeouts and headless mode here; `HEADLESS = False` keeps the browser visible. `MAX_NAVEGADORES` (env `GEOVICTORIA_MAX_NAVEGADORES`, default 3) caps simultaneous Chromium instances: extra jobs wait for a slot instead of failing login under load. `LOGIN_TIMEOUT` is 25 s.
 - CSS selectors are loaded from `config/selectors.json` at import time (falls back to hardcoded defaults if file is missing).
+- `verificar_boton_disponible` waits for Entrada **or** Salida at once (10 s total, Entrada wins if both), and `marcar_asistencia(accion=…)` waits only for the expected button. Waiting for Entrada first used to cost +5 s per state check and +10 s per salida (measured in production: 13 s vs 7 s, 19 s vs 10 s after login).
 
 **`programador.py`** — APScheduler-based scheduler. Key behaviors:
 - Uses `BlockingScheduler` with `CronTrigger` in `America/Bogota` timezone.
@@ -88,8 +89,9 @@ pytest tests/test_empleados.py
 
 ### Logs & State (`src/logs/`)
 
-- `geovictoria_YYYYMMDD.log` — per-day browser automation log (rotating, 5 MB × 5 files).
-- `programador_YYYYMMDD.log` — scheduler event log.
+- `geovictoria_YYYYMMDD.log` — per-day browser automation log.
+- `programador_YYYYMMDD.log` — scheduler event log; `errores_programador_YYYYMMDD.log` — its stderr (uncaught tracebacks).
+- All text logs use `src/log_diario.py` (`ArchivoDiario`): one file per calendar day, switching at midnight, **never renamed**. Do not go back to `RotatingFileHandler`: on Windows it cannot rename a log someone has open (the scheduler's own redirected stderr, the monitor, `ver_log_en_vivo.bat`), and in production from 5 MB on (~3 days) every line failed with WinError 32 and dumped a traceback instead (440 MB of logs, real lines buried). Real volume is ~1.8 MB/day, so there is no size cap. Logs older than 14 days are deleted at startup and on every day switch.
 - `registro_{emp_id}.json` / `registro_ejecuciones.json` — JSON registry tracking which markings were executed today (last 30 days). Used to prevent double-markings.
 - `alertas.log` — append-only file written when a marking fails; useful for external monitoring.
 - `eventos_YYYYMMDD.jsonl` — structured event journal (one JSON per line, fsync'd); source of truth for the monitor. `latido.json` — heartbeat + today's real schedule. Each mark in `registro_{emp_id}.json` carries `"origen"`: `"programador"` (it clicked) or `"portal"` (already done, detected from the portal).

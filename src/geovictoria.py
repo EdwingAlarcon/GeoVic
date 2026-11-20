@@ -4,7 +4,6 @@ import logging
 import os
 import time
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -18,8 +17,10 @@ except ImportError:  # ejecución directa: python src/geovictoria.py
 
 try:
     from src.bitacora import registrar
+    from src.log_diario import ArchivoDiario
 except ImportError:  # ejecución directa: python src/geovictoria.py
     from bitacora import registrar
+    from log_diario import ArchivoDiario
 
 
 class Config:
@@ -60,10 +61,11 @@ except (FileNotFoundError, json.JSONDecodeError):
 # --- Logging con rotación (5 MB x 5 archivos) ---
 log_dir = Path(__file__).parent / "logs"
 log_dir.mkdir(exist_ok=True)
-log_file = log_dir / f"geovictoria_{datetime.now().strftime('%Y%m%d')}.log"
-
 _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-_fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+# Un archivo por día sin renombrar: varios procesos (scripts manuales, marcar_pendientes) escriben aquí
+# a la vez y RotatingFileHandler no puede rotar en Windows un archivo que otro tiene abierto.
+_fh = ArchivoDiario(log_dir, "geovictoria")
+log_file = Path(_fh.baseFilename)
 _fh.setFormatter(_fmt)
 _sh = logging.StreamHandler()
 _sh.setFormatter(_fmt)
