@@ -174,24 +174,27 @@ async def login(page, usuario: str, password: str, tag: str = "", empleado: Opti
 
 
 async def verificar_boton_disponible(target_frame, tag: str = "") -> Optional[str]:
-    """Verifica qué botón de marcaje está disponible sin ejecutarlo."""
-    try:
-        btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
-        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.debug(f"{tag}🔍 Botón disponible: Marcar Entrada")
-        return "Entrada"
-    except PlaywrightTimeoutError:
-        pass
+    """Verifica qué botón de marcaje está disponible sin ejecutarlo.
 
+    Espera a CUALQUIERA de los dos botones a la vez. Antes esperaba 5 s a "Entrada" y solo después
+    buscaba "Salida": cada consulta con el portal ofreciendo "Salida" perdía 5 s con el cupo de
+    navegador ocupado. El plazo total (2 x BUTTON_TIMEOUT) es el mismo que tenía "Salida" antes, así
+    que un portal lento no tiene menos margen. Si se vieran los dos, gana "Entrada", como antes.
+    """
+    entrada = target_frame.locator(_SEL["attendance"]["btn_entrada"])
+    salida = target_frame.locator(_SEL["attendance"]["btn_salida"])
     try:
-        btn = target_frame.locator(_SEL["attendance"]["btn_salida"])
-        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.debug(f"{tag}🔍 Botón disponible: Marcar Salida")
-        return "Salida"
+        await entrada.or_(salida).first.wait_for(timeout=2 * Config.BUTTON_TIMEOUT, state="visible")
     except PlaywrightTimeoutError:
-        pass
+        logger.warning(f"{tag}⚠️ Ningún botón de marcaje disponible")
+        return None
 
-    logger.warning(f"{tag}⚠️ Ningún botón de marcaje disponible")
+    for nombre, btn in (("Entrada", entrada), ("Salida", salida)):
+        if await btn.first.is_visible():
+            logger.debug(f"{tag}🔍 Botón disponible: Marcar {nombre}")
+            return nombre
+
+    logger.warning(f"{tag}⚠️ El botón de marcaje desapareció mientras se consultaba")
     return None
 
 
@@ -213,36 +216,34 @@ async def _confirmar_marcaje(btn, nombre: str, tag: str = "") -> bool:
         return False
 
 
-async def marcar_asistencia(target_frame, tag: str = "") -> Optional[str]:
-    """Ejecuta el marcaje de entrada o salida y confirma que el portal lo registró."""
-    try:
-        btn = target_frame.locator(_SEL["attendance"]["btn_entrada"])
-        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.info(f"{tag}Haciendo clic en 'Marcar Entrada'...")
-        await btn.click(force=True)
-        if not await _confirmar_marcaje(btn, "Entrada", tag):
+async def _clic_y_confirmar(target_frame, nombre: str, tag: str = "") -> Optional[str]:
+    """Espera el botón "Marcar <nombre>", lo pulsa y confirma. Lanza PlaywrightTimeoutError si no aparece."""
+    btn = target_frame.locator(_SEL["attendance"]["btn_entrada" if nombre == "Entrada" else "btn_salida"])
+    await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
+    logger.info(f"{tag}Haciendo clic en 'Marcar {nombre}'...")
+    await btn.click(force=True)
+    if not await _confirmar_marcaje(btn, nombre, tag):
+        return None
+    logger.info(f"{tag}✅ Marcaje de {nombre} realizado")
+    return nombre
+
+
+async def marcar_asistencia(target_frame, tag: str = "", accion: Optional[str] = None) -> Optional[str]:
+    """Ejecuta el marcaje y confirma que el portal lo registró.
+
+    accion "Entrada"/"Salida": solo se espera y se pulsa ESE botón (el programador ya comprobó que el
+    portal lo ofrece). Antes se esperaban 5 s a "Entrada" también al marcar una salida.
+    accion None (marcaje manual): lo que haya, probando primero "Entrada", como siempre.
+    """
+    for nombre in ([accion] if accion else ["Entrada", "Salida"]):
+        try:
+            return await _clic_y_confirmar(target_frame, nombre, tag)
+        except PlaywrightTimeoutError:
+            continue
+        except Exception as e:
+            logger.error(f"{tag}❌ Error al marcar {nombre}: {e}")
             return None
-        logger.info(f"{tag}✅ Marcaje de Entrada realizado")
-        return "Entrada"
-
-    except PlaywrightTimeoutError:
-        pass
-
-    try:
-        btn = target_frame.locator(_SEL["attendance"]["btn_salida"])
-        await btn.wait_for(timeout=Config.BUTTON_TIMEOUT, state="visible")
-        logger.info(f"{tag}Haciendo clic en 'Marcar Salida'...")
-        await btn.click(force=True)
-        if not await _confirmar_marcaje(btn, "Salida", tag):
-            return None
-        logger.info(f"{tag}✅ Marcaje de Salida realizado")
-        return "Salida"
-
-    except PlaywrightTimeoutError:
-        logger.warning(f"{tag}❌ Ningún botón de marcaje disponible")
-    except Exception as e:
-        logger.error(f"{tag}❌ Error al marcar salida: {e}")
-
+    logger.warning(f"{tag}❌ Ningún botón de marcaje disponible")
     return None
 
 
@@ -352,7 +353,7 @@ async def run(accion_esperada: Optional[str] = None, empleado: Optional[Dict] = 
                                   motivo=f"el_portal_ofrece_{boton_disponible or 'ningun_boton'}")
                         return None
 
-                accion = await marcar_asistencia(target_frame, tag=tag)
+                accion = await marcar_asistencia(target_frame, tag=tag, accion=accion_esperada)
                 registrar("marcaje", empleado, esperada=accion_esperada, accion=accion,
                           resultado="ok" if accion else "no_realizado",
                           motivo=None if accion else "sin_botones_o_sin_confirmar")
