@@ -9,9 +9,10 @@ Uso:
   python scripts/monitor.py --host 0.0.0.0 --token CLAVE     # accesible por la red, protegido por token
                                                              # (entra con http://SERVIDOR:8765/?t=CLAVE)
 
-Solo LEE archivos (registros, bitácora, latido, alertas): no abre el portal, no modifica datos y no
-envía usuarios ni contraseñas (los empleados se reducen a id, nombre, activo y horario). Las alertas
-son locales: banda roja, título de la pestaña y, si lo activas, un sonido en esta página.
+Lee archivos (registros, bitácora, latido, alertas) y no abre el portal ni envía usuarios o
+contraseñas (los empleados se reducen a id, nombre, activo y horario). Lo único que escribe es
+config/novedades.json (vacaciones, desactivar, retiro; sin credenciales), y solo desde este equipo.
+Las alertas son locales: banda roja, título de la pestaña y, si lo activas, un sonido en esta página.
 """
 import argparse
 import json
@@ -27,7 +28,8 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import bitacora, control_programador
+from src import bitacora, control_programador, novedades
+from src import empleados as empleados_mod
 from src.control_concurrencia import desactivar_seleccion_consola
 from src import diagnostico_login as dl
 from src import estado_monitor
@@ -97,20 +99,60 @@ def _leer_alertas_hoy(hoy_iso: str) -> List[Dict]:
     return alertas
 
 
+def _ruta_novedades(ruta_empleados: Optional[Path]) -> Path:
+    """config/novedades.json, junto al employees.json en uso (en los tests, uno temporal)."""
+    return novedades.ruta_novedades(ruta_empleados or empleados_mod.EMPLOYEES_FILE)
+
+
+def _notas_reemplazo(todos: List[Dict], hoy) -> Dict[str, str]:
+    """Texto por empleado: "reemplaza a Ana (01/12 → 05/12)" y "cubierto por Pedro (…)" mientras no termine."""
+    ids = [e.get("id") for e in todos]
+    nombres = {e.get("id"): e.get("nombre") for e in todos}
+    notas: Dict[str, str] = {}
+    for e in todos:
+        r = empleados_mod.reemplazo_de(e, ids)
+        if not r or "invalido" in r or r["hasta"] < hoy:
+            continue
+        rango = f"{r['desde'].strftime('%d/%m/%Y')} → {r['hasta'].strftime('%d/%m/%Y')}"
+        notas[e.get("id")] = f"reemplaza a {nombres.get(r['cubre_a'])} ({rango})"
+        notas[r["cubre_a"]] = f"cubierto por {e.get('nombre')} ({rango})"
+    return notas
+
+
 def leer_estado(ruta_empleados: Optional[Path] = None, ahora: Optional[datetime] = None) -> Dict:
     """Lee los archivos y calcula el estado del día. Nunca lanza por datos faltantes."""
     ahora = ahora or datetime.now()
     try:
-        empleados = _sin_credenciales(dl.leer_empleados(ruta_empleados) if ruta_empleados else dl.leer_empleados())
+        crudos = dl.leer_empleados(ruta_empleados) if ruta_empleados else dl.leer_empleados()
     except (ValueError, OSError) as e:
         return {"error": f"No se pudo leer la lista de empleados: {e}"}
+    # Reemplazos temporales: horario de quien cubren + ausencias deducidas (fuera de periodo / cubierto)
+    empleados = _sin_credenciales(empleados_mod.resolver_reemplazos(crudos))
     hoy = ahora.date()
-    return estado_monitor.calcular_estado(
-        ahora, empleados, _leer_registros(empleados),
+    lista_nov, error_nov = novedades.leer(_ruta_novedades(ruta_empleados))
+    # Las novedades del monitor cuentan como ausencias: así "Ausentes hoy", VENCIDA y "Marcar pendientes"
+    # las respetan igual que las escritas a mano en employees.json.
+    con_novedades = [novedades.combinar(e, lista_nov) for e in empleados]
+    estado = estado_monitor.calcular_estado(
+        ahora, con_novedades, _leer_registros(empleados),
         bitacora.leer_eventos(ahora.strftime("%Y%m%d")), bitacora.leer_latido(),
         alertas_hoy=_leer_alertas_hoy(hoy.isoformat()), instancias=contar_instancias(),
         festivo=es_festivo(hoy),
     )
+    notas = _notas_reemplazo(crudos, hoy)
+    for fila in estado.get("empleados", []):
+        fila["novedades"] = novedades.vigentes_o_futuras(lista_nov, fila.get("id"), hoy)
+        fila["reemplazo"] = notas.get(fila.get("id"))
+    for emp_mal, motivo in empleados_mod.reemplazos_invalidos(crudos):
+        estado["mensajes"].append({"nivel": "aviso", "texto": f"{emp_mal.get('nombre')}: reemplazo mal configurado "
+                                                               f"en employees.json ({motivo}); no se le marca"})
+        if estado.get("nivel") == "ok":
+            estado["nivel"] = "aviso"
+    if error_nov:
+        estado["mensajes"].insert(0, {"nivel": "critico", "texto": f"{error_nov}. Si el programador se reinicia así, "
+                                                                     "NO aplicará vacaciones ni desactivaciones."})
+        estado["nivel"] = "critico"
+    return estado
 
 
 _LOGS_VISIBLES = {"programador": "programador", "geovictoria": "geovictoria"}
@@ -149,7 +191,7 @@ def leer_log(nombre: str, cuantas: int = 150, ruta_empleados: Optional[Path] = N
 # --- Control del programador (única parte que actúa; nunca toca el portal) ----------
 
 RAIZ = Path(__file__).resolve().parent.parent
-ACCIONES = ("iniciar", "detener", "reiniciar", "marcar_pendientes")
+ACCIONES = ("iniciar", "detener", "reiniciar", "marcar_pendientes", "novedad")
 _LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
 
@@ -260,6 +302,56 @@ class Manejador(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "mensaje": f"Marcando {len(pendientes)} pendiente(s): {nombres}. "
                                                 "El estado se actualiza en 1 o 2 minutos."})
 
+    def _novedad(self, datos: Dict, estado: Dict, forzar: bool) -> None:
+        """Agrega o quita una novedad (vacaciones, desactivar, retiro) en config/novedades.json.
+
+        Nunca toca employees.json (credenciales). Lo que afecta a HOY exige confirmar (forzar):
+        desactivar a quien ya marcó entrada deja su salida sin marcar, y reactivar a quien ya pasó su
+        hora hace que el programador marque la entrada en su revisión horaria.
+        """
+        ruta = _ruta_novedades(self.server.ruta_empleados)
+        hoy = datetime.now().date()
+        filas = {f.get("id"): f for f in estado.get("empleados", [])}
+        op = datos.get("op")
+        try:
+            if op == "agregar":
+                nueva = novedades.construir(datos, list(filas), hoy)
+                fila = filas.get(nueva["emp_id"]) or {}
+                entrada, salida = fila.get("entrada") or {}, fila.get("salida") or {}
+                if (novedades.afecta_hoy(nueva, hoy) and entrada.get("hora") and not salida.get("hora")
+                        and not forzar):
+                    return self._json(409, {"ok": False, "bloqueado": "entrada ya marcada",
+                                            "mensaje": f"{fila.get('nombre')} ya marcó entrada hoy ({entrada['hora']}): "
+                                                       "si guardas ahora, NO se marcará su salida de hoy."})
+                novedades.agregar(ruta, nueva)
+                emp, como = {"id": nueva["emp_id"], "nombre": fila.get("nombre")}, "agregada"
+                afectada = nueva
+            elif op == "terminar":
+                actuales, _ = novedades.leer(ruta)
+                objetivo = next((n for n in actuales if n.get("id") == datos.get("id")), None)
+                if objetivo and novedades.afecta_hoy(objetivo, hoy) and not forzar:
+                    return self._json(409, {"ok": False, "bloqueado": "vuelve hoy",
+                                            "mensaje": "Vuelve a marcar desde HOY: si ya pasó su hora de entrada, el "
+                                                       "programador la marcará en su próxima revisión horaria (hasta las 12:00)."})
+                afectada, como = novedades.terminar(ruta, str(datos.get("id")), hoy)
+                emp = {"id": afectada.get("emp_id"), "nombre": (filas.get(afectada.get("emp_id")) or {}).get("nombre")}
+            else:
+                return self._json(400, {"ok": False, "mensaje": "Operación desconocida."})
+        except novedades.NovedadInvalida as e:
+            return self._json(400, {"ok": False, "mensaje": str(e)})
+        except OSError as e:
+            bitacora.registrar("control", accion="novedad", ok=False, error=str(e))
+            return self._json(500, {"ok": False, "mensaje": f"No se pudo guardar: {e}"})
+        bitacora.registrar("novedad", emp, operacion=como, novedad_id=afectada.get("id"), tipo_novedad=afectada.get("tipo"),
+                           desde=afectada.get("desde"), hasta=afectada.get("hasta"), motivo=afectada.get("motivo"),
+                           forzado=forzar)
+        self.server.invalidar_estado()
+        fin = afectada.get("hasta") or "sin fecha de fin"
+        texto = {"agregada": f"Guardado: {emp['nombre']} — {afectada.get('motivo')} desde {afectada.get('desde')} ({fin}).",
+                 "eliminada": f"Quitada la novedad de {emp['nombre']} ({afectada.get('motivo')}).",
+                 "cerrada": f"{emp['nombre']} vuelve a marcar desde hoy ({afectada.get('motivo')} cerrada ayer)."}[como]
+        return self._json(200, {"ok": True, "mensaje": texto + " No hace falta reiniciar."})
+
     def do_POST(self):
         """Única ruta que actúa: /api/accion. Solo desde este equipo, con token si lo hay, con cabecera
         propia (un formulario de otra web no puede enviarla) y sin reiniciar a mitad de un marcaje."""
@@ -296,6 +388,8 @@ class Manejador(BaseHTTPRequestHandler):
             estado, _ = self.server.estado()
             if accion == "marcar_pendientes":
                 return self._marcar_pendientes(estado)
+            if accion == "novedad":
+                return self._novedad(datos, estado, forzar)
             bloqueo = None if accion == "iniciar" else estado_monitor.bloqueo_por_marcaje(estado, datetime.now())
             if bloqueo and not forzar:
                 return self._json(409, {"ok": False, "bloqueado": bloqueo,
@@ -424,6 +518,24 @@ pre.log .e{color:var(--cr);font-weight:600}pre.log .w{color:var(--av)}
 footer{display:flex;gap:14px;align-items:center;flex-wrap:wrap;color:var(--mut);font-size:12px}
 .pulso{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;animation:p 2s infinite}
 @keyframes p{50%{opacity:.25}}@media (prefers-reduced-motion:reduce){.pulso{animation:none}}
+/* Novedades (vacaciones, desactivar, retiro): etiqueta bajo el nombre y diálogo Carbon (modal recto, sin sombra) */
+.nov{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:12px}
+.nov .b{background:var(--avb);color:var(--av)}.nov .b.rem{background:var(--peb);color:var(--pe)}
+button.mini{padding:2px 8px;font-size:12px;background:transparent;color:var(--ac);border-color:transparent}
+button.mini:hover:not(:disabled){background:var(--rowh)}
+dialog{border:0;border-radius:0;padding:0;width:min(520px,calc(100vw - 32px));background:var(--card);color:var(--tx)}
+dialog::backdrop{background:rgba(22,22,22,.5)}
+dialog form{padding:20px;display:grid;gap:14px}
+dialog h3{margin:0;font-weight:400;font-size:20px}
+dialog fieldset{border:0;margin:0;padding:0;display:grid;gap:8px}
+dialog legend{font-size:12px;color:var(--mut);margin-bottom:6px;letter-spacing:.32px}
+dialog label{display:flex;gap:8px;align-items:center}
+.campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.campos label{flex-direction:column;align-items:stretch;gap:4px;font-size:12px;color:var(--mut)}
+dialog input[type=date],dialog input[type=text]{font:inherit;font-size:14px;padding:9px 12px;border:0;border-bottom:1px solid var(--mut);background:var(--sub);color:var(--tx);border-radius:0;width:100%}
+.pie{display:flex;gap:1px;justify-content:flex-end;margin:0 -20px -20px}
+.pie button{flex:1;justify-content:flex-start;padding:14px 16px 26px}
+#nov-msg{min-height:1.2em}
 @media (max-width:640px){.top{padding:12px 14px}main{padding:14px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi span{font-size:20px}.ctl button{flex:1 1 auto;justify-content:center}ul.act .n{min-width:110px}}
 @media (min-width:1000px) and (max-width:1250px){.kpi span{font-size:22px}}
 </style></head><body>
@@ -471,9 +583,27 @@ footer{display:flex;gap:14px;align-items:center;flex-wrap:wrap;color:var(--mut);
    <label><input type="checkbox" id="logsolo"> solo avisos y errores</label> <span id="logarch"></span></div>
   <pre id="logtxt" class="log">Abre este panel para ver el log.</pre></details></section>
  <footer><span class="pulso" aria-hidden="true"></span><span>Se actualiza cada 5 s · <span id="ult"></span></span>
-  <span>Solo lectura (salvo los botones, solo desde este equipo)</span>
+  <span>Solo lectura (salvo los botones y las novedades, solo desde este equipo)</span>
   <button id="snd"><svg class="ic"><use href="#i-bell-off"/></svg><span>Sonido apagado</span></button></footer>
 </main>
+<dialog id="nov" aria-labelledby="nov-tit"><form method="dialog" id="nov-form">
+ <h3 id="nov-tit">Novedad</h3>
+ <fieldset><legend>TIPO</legend>
+  <label><input type="radio" name="tipo" value="ausencia" checked> Vacaciones, licencia o incapacidad (con fechas)</label>
+  <label><input type="radio" name="tipo" value="desactivado"> Desactivar desde hoy (hasta que lo reactives)</label>
+  <label><input type="radio" name="tipo" value="retiro"> Retiro (deja de marcar después de su último día)</label>
+ </fieldset>
+ <div class="campos" id="c-ausencia">
+  <label>Desde<input type="date" id="n-desde" required></label>
+  <label>Hasta (vacío = sin fecha de fin)<input type="date" id="n-hasta"></label>
+  <label style="grid-column:1/-1">Motivo<input type="text" id="n-motivo" maxlength="60" list="motivos" placeholder="vacaciones"></label>
+ </div>
+ <div class="campos" id="c-retiro" hidden><label>Último día que marca<input type="date" id="n-ultimo"></label></div>
+ <datalist id="motivos"><option value="vacaciones"><option value="licencia"><option value="incapacidad"><option value="permiso"><option value="calamidad"></datalist>
+ <div class="small">Se aplica sin reiniciar el programador. Solo se guarda en config/novedades.json (sin contraseñas).</div>
+ <div class="small error" id="nov-msg" role="alert"></div>
+ <div class="pie"><button type="button" id="nov-cancelar">Cancelar</button><button type="submit" class="pri" id="nov-guardar">Guardar</button></div>
+</form></dialog>
 <script>
 const Q = new URLSearchParams(location.search), T = Q.get("t");
 const URL_API = "/api/estado" + (T ? "?t=" + encodeURIComponent(T) : "");
@@ -533,7 +663,15 @@ function pintar(d){
   const tb = document.getElementById("filas"); tb.replaceChildren();
   filas.forEach(f => {
     const tr = el("tr", f.entrada && (f.entrada.estado==="vencida"||f.entrada.estado==="no_confirmada") ? "f-crit" : "");
-    const t1 = el("td"); t1.append(el("b","",f.nombre)); t1.append(el("div","small", f.dia === "desactivado" ? "desactivado" : f.dia));
+    const t1 = el("td"); t1.append(el("b","",f.nombre)); t1.append(el("div","small", f.dia === "desactivado" ? "desactivado (employees.json)" : f.dia));
+    const hoy = String(d.ahora).slice(0,10);
+    if (f.reemplazo) t1.append(con(el("div","nov"), el("span","b rem", f.reemplazo)));
+    (f.novedades || []).forEach(n => {
+      const fila = con(el("div","nov"), el("span","b", textoNov(n)));
+      if (puedeEditar) { const b = el("button","mini", n.desde < hoy ? "Reactivar" : "Quitar"); b.type = "button"; b.onclick = () => terminarNov(f, n, hoy); fila.append(b); }
+      t1.append(fila);
+    });
+    if (puedeEditar && f.dia !== "desactivado") { const b = el("button","mini","+ Novedad"); b.type = "button"; b.onclick = () => abrirNov(f); t1.append(con(el("div","nov"), b)); }
     tr.append(t1, celda(f.entrada), celda(f.salida));
     const tl = el("td");
     if (f.login) { tl.append(con(el("span", f.login.ok ? "okc" : "error"), ico(f.login.ok ? "check" : "x"), " " + f.login.hora + (f.login.ok ? "" : " " + (f.login.motivo || ""))));
@@ -570,9 +708,70 @@ document.getElementById("b-marcar").onclick = () => {
   const lista = pendientes.map(p => "• " + p.nombre + " — " + p.accion).join("\n");
   if (confirm("Se intentará marcar:\n\n" + lista + "\n\nSolo se hace clic si el portal ofrece ese botón (si ya está marcado, no se duplica).\n¿Continuar?")) accion("marcar_pendientes", false);
 };
+// --- Novedades: vacaciones, desactivar, retiro (solo desde este equipo, igual que los botones) ---
+let puedeEditar = false, empNov = null;
+const fecha = s => s ? s.slice(8,10) + "/" + s.slice(5,7) + "/" + s.slice(0,4) : "";
+function textoNov(n){
+  if (n.tipo === "retiro") return "retiro: no marca desde " + fecha(n.desde);
+  if (n.tipo === "desactivado") return "desactivado desde " + fecha(n.desde);
+  return n.motivo + " " + fecha(n.desde) + (n.hasta ? " → " + fecha(n.hasta) : " → sin fecha de fin");
+}
+async function enviarNov(cuerpo, forzar){
+  const r = await fetch("/api/accion" + (T ? "?t=" + encodeURIComponent(T) : ""), {method:"POST",
+    headers:{"Content-Type":"application/json","X-GeoVic-Accion":"1"}, body: JSON.stringify({accion:"novedad", forzar:!!forzar, ...cuerpo})});
+  const d = await r.json();
+  if (r.status === 409 && d.bloqueado && !forzar) {
+    if (confirm(d.mensaje + "\n\n¿Guardar de todos modos?")) return enviarNov(cuerpo, true);
+    return {ok:false, mensaje:"No se guardó nada."};
+  }
+  return d;
+}
+function mostrarCampos(){
+  const t = document.querySelector("#nov-form input[name=tipo]:checked").value;
+  document.getElementById("c-ausencia").hidden = t !== "ausencia";
+  document.getElementById("c-retiro").hidden = t !== "retiro";
+  document.getElementById("n-desde").required = t === "ausencia";
+  document.getElementById("n-ultimo").required = t === "retiro";
+}
+document.querySelectorAll("#nov-form input[name=tipo]").forEach(r => r.onchange = mostrarCampos);
+function abrirNov(f){
+  empNov = f;
+  const form = document.getElementById("nov-form"); form.reset();
+  document.getElementById("nov-tit").textContent = "Novedad · " + f.nombre;
+  document.getElementById("nov-msg").textContent = "";
+  const hoy = new Date(); hoy.setMinutes(hoy.getMinutes() - hoy.getTimezoneOffset());
+  document.getElementById("n-desde").value = hoy.toISOString().slice(0,10);
+  mostrarCampos(); document.getElementById("nov").showModal();
+}
+document.getElementById("nov-cancelar").onclick = () => document.getElementById("nov").close();
+document.getElementById("nov-form").onsubmit = async ev => {
+  ev.preventDefault();
+  const tipo = document.querySelector("#nov-form input[name=tipo]:checked").value, msg = document.getElementById("nov-msg");
+  const cuerpo = {op:"agregar", emp_id:empNov.id, tipo, desde:document.getElementById("n-desde").value,
+                  hasta:document.getElementById("n-hasta").value || null, motivo:document.getElementById("n-motivo").value,
+                  ultimo_dia:document.getElementById("n-ultimo").value};
+  if (tipo === "desactivado" && !confirm(empNov.nombre + " dejará de marcar desde HOY hasta que lo reactives. ¿Continuar?")) return;
+  const g = document.getElementById("nov-guardar"); g.disabled = true; msg.textContent = "Guardando…";
+  try {
+    const d = await enviarNov(cuerpo, false);
+    if (d.ok) { document.getElementById("nov").close(); document.getElementById("ctlmsg").textContent = d.mensaje; ciclo(); }
+    else msg.textContent = d.mensaje;
+  } catch(e){ msg.textContent = "No se pudo contactar con el monitor."; }
+  g.disabled = false;
+};
+async function terminarNov(f, n, hoy){
+  const enCurso = n.desde <= hoy;
+  const txt = enCurso ? f.nombre + " vuelve a marcar desde HOY (" + textoNov(n) + ").\n\nSi ya pasó su hora de entrada, el programador la marcará en su próxima revisión horaria (hasta las 12:00)."
+                      : "Quitar la novedad de " + f.nombre + ": " + textoNov(n) + ".";
+  if (!confirm(txt + "\n\n¿Continuar?")) return;
+  try { const d = await enviarNov({op:"terminar", id:n.id}, true); document.getElementById("ctlmsg").textContent = (d.ok ? "" : "Error: ") + d.mensaje; }
+  catch(e){ document.getElementById("ctlmsg").textContent = "Error: no se pudo contactar con el monitor."; }
+  ciclo();
+}
 async function cicloControl(){
   try {
     const r = await fetch("/api/control" + (T ? "?t=" + encodeURIComponent(T) : ""), {cache:"no-store"}); const d = await r.json();
+    if (puedeEditar !== !!d.permitido) { puedeEditar = !!d.permitido; ciclo(); }
     document.getElementById("ctl").hidden = !d.permitido;
     pendientes = d.pendientes || [];
     const bm = document.getElementById("b-marcar"); bm.hidden = !pendientes.length;
@@ -629,7 +828,7 @@ def main() -> int:
 
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '') else args.host}:{args.puerto}/" + (f"?t={args.token}" if args.token else "")
     contar_instancias()  # la primera lectura de procesos tarda varios segundos en Windows; así la página abre al instante
-    print(f"✅ Monitor en {url}   (Ctrl+C para cerrar; solo lectura)")
+    print(f"✅ Monitor en {url}   (Ctrl+C para cerrar)")
     if args.abrir:
         webbrowser.open(url)
     try:
