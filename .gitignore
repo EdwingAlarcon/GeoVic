@@ -29,6 +29,8 @@ env/
 # Credenciales y configuración sensible
 .env
 config/employees.json
+# Novedades del personal (vacaciones, incapacidades...): las escribe el monitor en el servidor
+config/novedades.json
 
 # Claude Code — configuración local del desarrollador
 .claude/settings.local.json

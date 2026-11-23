@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
+from src import novedades
+
 EMPLOYEES_FILE = Path(__file__).parent.parent / "config" / "employees.json"
 
 _HORARIO_DEFAULT: Dict = {
@@ -124,17 +126,26 @@ def ausencias_invalidas(empleado: Dict) -> List[str]:
     return [json.dumps(a, ensure_ascii=False) for a in ausencias if _rango_ausencia(a) is None]
 
 
+def ruta_novedades() -> Path:
+    """config/novedades.json (lo escribe el monitor). Se calcula en cada uso, junto a EMPLOYEES_FILE."""
+    return novedades.ruta_novedades(EMPLOYEES_FILE)
+
+
 def ausencia_vigente(empleado: Dict, dia: date) -> Optional[str]:
-    """Como ausencia_en, pero relee employees.json: añadir unas vacaciones no exige reiniciar el
-    programador. Si el archivo no se puede leer se usa lo cargado al arrancar."""
+    """Como ausencia_en, pero relee employees.json y novedades.json: añadir unas vacaciones (a mano o
+    desde el monitor) no exige reiniciar el programador. Si employees.json no se puede leer se usa lo
+    cargado al arrancar; si novedades.json está ilegible, su última lectura válida."""
+    actual = empleado
     try:
         with open(EMPLOYEES_FILE, "r", encoding="utf-8") as f:
             for e in json.load(f).get("employees", []):
                 if e.get("id") == empleado.get("id"):
-                    return ausencia_en(e, dia)
+                    actual = e
+                    break
     except (OSError, ValueError, AttributeError):
         pass
-    return ausencia_en(empleado, dia)
+    lista, _ = novedades.leer(ruta_novedades())
+    return ausencia_en(novedades.combinar(actual, lista), dia)
 
 
 def _validar_empleado(emp: Dict) -> None:

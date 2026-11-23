@@ -25,7 +25,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src import bitacora
 from src.cache_estado import get_cache
 from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica, desactivar_seleccion_consola
-from src.empleados import ausencia_vigente, ausencias_invalidas, cargar_empleados, obtener_horario_dia
+from src import novedades
+from src.empleados import (ausencia_vigente, ausencias_invalidas, cargar_empleados, obtener_horario_dia,
+                           ruta_novedades)
 from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
 from src.festivos_colombia import es_festivo, listar_festivos_año
 from src.geovictoria import Config, run, verificar_estado
@@ -948,6 +950,11 @@ def main() -> None:
             logger.warning(f"  ⚠️ [{emp['id']}] ausencia ignorada por estar mal escrita: {mala} "
                            f"(formato: {{\"desde\": \"AAAA-MM-DD\", \"hasta\": \"AAAA-MM-DD\", \"motivo\": \"…\"}})")
             bitacora.registrar("aviso", emp, mensaje=f"ausencia mal escrita, se ignora: {mala}")
+    _, error_novedades = novedades.leer(ruta_novedades())
+    if error_novedades:
+        # Sin lectura válida previa en este proceso: no se aplican vacaciones ni desactivaciones del monitor
+        logger.warning(f"⚠️ {error_novedades}. Las novedades del monitor NO se aplican hasta corregirlo.")
+        bitacora.registrar("aviso", mensaje=f"novedades ilegibles: {error_novedades}")
 
     listar_festivos_año(datetime.now().year)
 

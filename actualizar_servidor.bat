@@ -7,7 +7,7 @@ REM Pregunta la carpeta del proyecto instalado (la recuerda: la proxima vez bast
 REM copia el codigo nuevo encima, limpia restos de versiones anteriores y reinicia el programador
 REM y el monitor web (ventana "Monitor GeoVictoria", http://127.0.0.1:8765).
 REM
-REM Conserva: .env, config\employees.json, config\festivos_adicionales.json, src\logs, .venv
+REM Conserva: .env, config\employees.json, config\festivos_adicionales.json, config\novedades.json, src\logs, .venv
 REM No requiere Administrador: el programador queda en una ventana de TU sesion (navegador visible).
 
 set "TASK=GeoVictoria Programador"
@@ -73,7 +73,7 @@ if not exist "%LOCALAPPDATA%\GeoVic" mkdir "%LOCALAPPDATA%\GeoVic" >nul 2>&1
 
 echo.
 echo Destino: %TARGET%
-echo Se conservan: .env, config\employees.json, config\festivos_adicionales.json, src\logs, .venv
+echo Se conservan: .env, config\employees.json, config\festivos_adicionales.json, config\novedades.json, src\logs, .venv
 echo.
 echo [1/5] Cerrando el programador y el monitor en marcha, con sus ventanas...
 schtasks /end /tn "%TASK%" >nul 2>&1
@@ -142,9 +142,10 @@ if exist "%SRC%\docs" (
     robocopy "%SRC%\docs" "%TARGET%\docs" /E /NFL /NDL /NJH /NJS /NP >nul
     if errorlevel 8 goto :err_copia
 )
-REM config: nunca se pisan los datos propios del servidor (credenciales y festivos adicionales).
+REM config: nunca se pisan los datos propios del servidor (credenciales, festivos adicionales y novedades
+REM del personal que se gestionan desde el monitor).
 REM selectors.json si se actualiza: refleja el DOM actual del portal.
-robocopy "%SRC%\config" "%TARGET%\config" /E /XF employees.json festivos_adicionales.json /NFL /NDL /NJH /NJS /NP >nul
+robocopy "%SRC%\config" "%TARGET%\config" /E /XF employees.json festivos_adicionales.json novedades.json /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto :err_copia
 if not exist "%TARGET%\config\festivos_adicionales.json" (
     if exist "%SRC%\config\festivos_adicionales.json" copy /Y "%SRC%\config\festivos_adicionales.json" "%TARGET%\config\" >nul

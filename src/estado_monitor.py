@@ -173,6 +173,11 @@ def describir(evento: Dict) -> Dict:
             nivel, texto = "aviso", "Confirmación no concluyente (sin botón o sin conexión)"
     elif tipo == "alerta":
         nivel, texto = "error", f"ALERTA: {evento.get('mensaje')}"
+    elif tipo == "novedad":
+        rango = f"{evento.get('desde')} → {evento.get('hasta') or 'sin fin'}"
+        operacion = {"agregada": "Novedad guardada", "eliminada": "Novedad quitada",
+                     "cerrada": "Reactivado (novedad cerrada ayer)"}.get(evento.get("operacion"), "Novedad")
+        nivel, texto = "aviso", f"{operacion}: {evento.get('motivo')} ({rango})"
     return {"hora": str(evento.get("ts", ""))[11:19], "nombre": evento.get("nombre") or "—",
             "tipo": tipo, "texto": texto, "nivel": nivel}
 
