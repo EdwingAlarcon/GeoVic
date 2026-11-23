@@ -104,13 +104,30 @@ def _ruta_novedades(ruta_empleados: Optional[Path]) -> Path:
     return novedades.ruta_novedades(ruta_empleados or empleados_mod.EMPLOYEES_FILE)
 
 
+def _notas_reemplazo(todos: List[Dict], hoy) -> Dict[str, str]:
+    """Texto por empleado: "reemplaza a Ana (01/12 → 05/12)" y "cubierto por Pedro (…)" mientras no termine."""
+    ids = [e.get("id") for e in todos]
+    nombres = {e.get("id"): e.get("nombre") for e in todos}
+    notas: Dict[str, str] = {}
+    for e in todos:
+        r = empleados_mod.reemplazo_de(e, ids)
+        if not r or "invalido" in r or r["hasta"] < hoy:
+            continue
+        rango = f"{r['desde'].strftime('%d/%m/%Y')} → {r['hasta'].strftime('%d/%m/%Y')}"
+        notas[e.get("id")] = f"reemplaza a {nombres.get(r['cubre_a'])} ({rango})"
+        notas[r["cubre_a"]] = f"cubierto por {e.get('nombre')} ({rango})"
+    return notas
+
+
 def leer_estado(ruta_empleados: Optional[Path] = None, ahora: Optional[datetime] = None) -> Dict:
     """Lee los archivos y calcula el estado del día. Nunca lanza por datos faltantes."""
     ahora = ahora or datetime.now()
     try:
-        empleados = _sin_credenciales(dl.leer_empleados(ruta_empleados) if ruta_empleados else dl.leer_empleados())
+        crudos = dl.leer_empleados(ruta_empleados) if ruta_empleados else dl.leer_empleados()
     except (ValueError, OSError) as e:
         return {"error": f"No se pudo leer la lista de empleados: {e}"}
+    # Reemplazos temporales: horario de quien cubren + ausencias deducidas (fuera de periodo / cubierto)
+    empleados = _sin_credenciales(empleados_mod.resolver_reemplazos(crudos))
     hoy = ahora.date()
     lista_nov, error_nov = novedades.leer(_ruta_novedades(ruta_empleados))
     # Las novedades del monitor cuentan como ausencias: así "Ausentes hoy", VENCIDA y "Marcar pendientes"
@@ -122,8 +139,15 @@ def leer_estado(ruta_empleados: Optional[Path] = None, ahora: Optional[datetime]
         alertas_hoy=_leer_alertas_hoy(hoy.isoformat()), instancias=contar_instancias(),
         festivo=es_festivo(hoy),
     )
+    notas = _notas_reemplazo(crudos, hoy)
     for fila in estado.get("empleados", []):
         fila["novedades"] = novedades.vigentes_o_futuras(lista_nov, fila.get("id"), hoy)
+        fila["reemplazo"] = notas.get(fila.get("id"))
+    for emp_mal, motivo in empleados_mod.reemplazos_invalidos(crudos):
+        estado["mensajes"].append({"nivel": "aviso", "texto": f"{emp_mal.get('nombre')}: reemplazo mal configurado "
+                                                               f"en employees.json ({motivo}); no se le marca"})
+        if estado.get("nivel") == "ok":
+            estado["nivel"] = "aviso"
     if error_nov:
         estado["mensajes"].insert(0, {"nivel": "critico", "texto": f"{error_nov}. Si el programador se reinicia así, "
                                                                      "NO aplicará vacaciones ni desactivaciones."})
@@ -496,7 +520,7 @@ footer{display:flex;gap:14px;align-items:center;flex-wrap:wrap;color:var(--mut);
 @keyframes p{50%{opacity:.25}}@media (prefers-reduced-motion:reduce){.pulso{animation:none}}
 /* Novedades (vacaciones, desactivar, retiro): etiqueta bajo el nombre y diálogo Carbon (modal recto, sin sombra) */
 .nov{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:12px}
-.nov .b{background:var(--avb);color:var(--av)}
+.nov .b{background:var(--avb);color:var(--av)}.nov .b.rem{background:var(--peb);color:var(--pe)}
 button.mini{padding:2px 8px;font-size:12px;background:transparent;color:var(--ac);border-color:transparent}
 button.mini:hover:not(:disabled){background:var(--rowh)}
 dialog{border:0;border-radius:0;padding:0;width:min(520px,calc(100vw - 32px));background:var(--card);color:var(--tx)}
@@ -641,6 +665,7 @@ function pintar(d){
     const tr = el("tr", f.entrada && (f.entrada.estado==="vencida"||f.entrada.estado==="no_confirmada") ? "f-crit" : "");
     const t1 = el("td"); t1.append(el("b","",f.nombre)); t1.append(el("div","small", f.dia === "desactivado" ? "desactivado (employees.json)" : f.dia));
     const hoy = String(d.ahora).slice(0,10);
+    if (f.reemplazo) t1.append(con(el("div","nov"), el("span","b rem", f.reemplazo)));
     (f.novedades || []).forEach(n => {
       const fila = con(el("div","nov"), el("span","b", textoNov(n)));
       if (puedeEditar) { const b = el("button","mini", n.desde < hoy ? "Reactivar" : "Quitar"); b.type = "button"; b.onclick = () => terminarNov(f, n, hoy); fila.append(b); }

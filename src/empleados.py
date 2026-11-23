@@ -2,9 +2,10 @@
 Carga y valida la configuración de empleados.
 Soporta modo individual (.env) y multi-empleado (config/employees.json).
 """
+import copy
 import json
 import os
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -126,6 +127,93 @@ def ausencias_invalidas(empleado: Dict) -> List[str]:
     return [json.dumps(a, ensure_ascii=False) for a in ausencias if _rango_ausencia(a) is None]
 
 
+# --- Reemplazos temporales ------------------------------------------------------
+# Una persona que hoy no está en el sistema cubre por unos días el turno de otra. Se da de alta en
+# employees.json (con SUS credenciales) y un bloque:
+#     "reemplazo": {"cubre_a": "emp07", "desde": "2026-12-01", "hasta": "2026-12-05"}
+# Dentro del periodo marca con el horario de quien cubre (salvo que tenga "horario" propio) y la persona
+# cubierta queda ausente ("cubierto por …"). Fuera del periodo el reemplazo NO marca. Si el bloque está
+# mal escrito, el reemplazo no marca nunca (es alguien nuevo: no marcar es más seguro que marcar mal) y
+# la persona cubierta sigue marcando normal.
+
+_ANTES_DE_TODO = "2000-01-01"
+_ULTIMOS_TODOS: List[Dict] = []  # última lectura válida de employees.json (respaldo si no se puede releer)
+
+
+def reemplazo_de(empleado: Dict, ids: Optional[List] = None) -> Optional[Dict]:
+    """None si no es un reemplazo; {"cubre_a", "desde", "hasta"} si es válido; {"invalido": texto} si no."""
+    r = empleado.get("reemplazo")
+    if r is None:
+        return None
+    if not isinstance(r, dict):
+        return {"invalido": "el bloque 'reemplazo' debe ser un objeto"}
+    desde, hasta = _fecha_iso(r.get("desde")), _fecha_iso(r.get("hasta"))
+    if not r.get("cubre_a"):
+        return {"invalido": "falta 'cubre_a' (id de la persona a la que cubre)"}
+    if ids is not None and r["cubre_a"] not in ids:
+        return {"invalido": f"'cubre_a' = {r['cubre_a']} no existe en employees.json"}
+    if r["cubre_a"] == empleado.get("id"):
+        return {"invalido": "no puede cubrirse a sí mismo"}
+    if desde is None or hasta is None:
+        return {"invalido": "'desde' y 'hasta' son obligatorios (AAAA-MM-DD)"}
+    if hasta < desde:
+        return {"invalido": "'hasta' es anterior a 'desde'"}
+    return {"cubre_a": r["cubre_a"], "desde": desde, "hasta": hasta}
+
+
+def ultimos_empleados() -> List[Dict]:
+    """Todos los empleados (activos o no) de la última lectura válida de employees.json."""
+    return list(_ULTIMOS_TODOS)
+
+
+def reemplazos_invalidos(todos: List[Dict]) -> List[Tuple[Dict, str]]:
+    """(empleado, motivo) de cada bloque "reemplazo" mal escrito, para avisar al arrancar."""
+    ids = [e.get("id") for e in todos]
+    return [(e, r["invalido"]) for e in todos if (r := reemplazo_de(e, ids)) and "invalido" in r]
+
+
+def ausencias_por_reemplazo(todos: List[Dict]) -> Dict[str, List[Dict]]:
+    """Ausencias que se deducen de los reemplazos: el reemplazo fuera de su periodo y el cubierto dentro."""
+    ids = [e.get("id") for e in todos]
+    nombres = {e.get("id"): e.get("nombre") or e.get("id") for e in todos}
+    extra: Dict[str, List[Dict]] = {}
+    for e in todos:
+        r = reemplazo_de(e, ids)
+        if r is None:
+            continue
+        propias = extra.setdefault(e.get("id"), [])
+        if "invalido" in r:
+            propias.append({"desde": _ANTES_DE_TODO, "motivo": f"reemplazo mal configurado: {r['invalido']}"})
+            continue
+        if r["desde"] > date.fromisoformat(_ANTES_DE_TODO):
+            propias.append({"desde": _ANTES_DE_TODO, "hasta": (r["desde"] - timedelta(days=1)).isoformat(),
+                            "motivo": f"reemplazo: empieza el {r['desde'].isoformat()}"})
+        propias.append({"desde": (r["hasta"] + timedelta(days=1)).isoformat(),
+                        "motivo": f"reemplazo: terminó el {r['hasta'].isoformat()}"})
+        extra.setdefault(r["cubre_a"], []).append(
+            {"desde": r["desde"].isoformat(), "hasta": r["hasta"].isoformat(), "motivo": f"cubierto por {nombres[e.get('id')]}"})
+    return extra
+
+
+def resolver_reemplazos(todos: List[Dict]) -> List[Dict]:
+    """Copias de los empleados con el horario de reemplazo aplicado y sus ausencias deducidas añadidas."""
+    por_id = {e.get("id"): e for e in todos}
+    ids = list(por_id)
+    extra = ausencias_por_reemplazo(todos)
+    salida = []
+    for e in todos:
+        copia = dict(e)
+        r = reemplazo_de(e, ids)
+        if r and "invalido" not in r and not e.get("horario"):
+            copia["horario"] = copy.deepcopy(por_id[r["cubre_a"]].get("horario") or {})
+        if extra.get(e.get("id")):
+            propias = e.get("ausencias")
+            propias = list(propias) if isinstance(propias, list) else ([] if propias is None else [propias])
+            copia["ausencias"] = propias + extra[e.get("id")]
+        salida.append(copia)
+    return salida
+
+
 def ruta_novedades() -> Path:
     """config/novedades.json (lo escribe el monitor). Se calcula en cada uso, junto a EMPLOYEES_FILE."""
     return novedades.ruta_novedades(EMPLOYEES_FILE)
@@ -135,15 +223,25 @@ def ausencia_vigente(empleado: Dict, dia: date) -> Optional[str]:
     """Como ausencia_en, pero relee employees.json y novedades.json: añadir unas vacaciones (a mano o
     desde el monitor) no exige reiniciar el programador. Si employees.json no se puede leer se usa lo
     cargado al arrancar; si novedades.json está ilegible, su última lectura válida."""
-    actual = empleado
+    emp_id = empleado.get("id")
+    leidos: Optional[List[Dict]] = None
     try:
         with open(EMPLOYEES_FILE, "r", encoding="utf-8") as f:
-            for e in json.load(f).get("employees", []):
-                if e.get("id") == empleado.get("id"):
-                    actual = e
-                    break
+            crudo = json.load(f).get("employees", [])
+        if isinstance(crudo, list):
+            leidos = [e for e in crudo if isinstance(e, dict)]
+            _ULTIMOS_TODOS[:] = leidos
     except (OSError, ValueError, AttributeError):
         pass
+    # Sin lectura válida: los datos propios son los cargados al arrancar y los reemplazos se deducen de
+    # la última lista buena. Los reemplazos se resuelven con la lista completa: el cubierto no sabe por
+    # sí solo que lo cubren.
+    fuente = leidos if leidos is not None else list(_ULTIMOS_TODOS)
+    propio = next((e for e in leidos or [] if e.get("id") == emp_id), empleado)
+    lista_completa = [propio if e.get("id") == emp_id else e for e in fuente]
+    if not any(e.get("id") == emp_id for e in fuente):
+        lista_completa.append(propio)
+    actual = next(e for e in resolver_reemplazos(lista_completa) if e.get("id") == emp_id)
     lista, _ = novedades.leer(ruta_novedades())
     return ausencia_en(novedades.combinar(actual, lista), dia)
 
@@ -163,7 +261,10 @@ def cargar_empleados() -> List[Dict]:
         with open(EMPLOYEES_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        activos = [e for e in data.get("employees", []) if e.get("activo", True)]
+        todos = [e for e in data.get("employees", []) if isinstance(e, dict)]
+        _ULTIMOS_TODOS[:] = todos
+        # Reemplazos: horario de quien cubren (se resuelve con todos, aunque el cubierto esté inactivo)
+        activos = [e for e in resolver_reemplazos(todos) if e.get("activo", True)]
 
         if not activos:
             raise ValueError("No hay empleados activos en config/employees.json")

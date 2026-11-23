@@ -62,6 +62,14 @@
           }
         }
       }
+    },
+    {
+      "id": "emp4",
+      "nombre": "Reemplazo Temporal",
+      "usuario": "usuario_geovictoria_4",
+      "password": "contraseña_4",
+      "activo": true,
+      "reemplazo": {"cubre_a": "emp2", "desde": "2026-12-01", "hasta": "2026-12-05"}
     }
   ]
 }
