@@ -165,6 +165,12 @@ async def probar_todos(empleados, headless: bool, url: str) -> int:
     """Login de cada empleado en secuencia (uno por uno, nunca en paralelo) y una línea por cada uno."""
     fallos = 0
     for emp in empleados:
+        try:
+            emp = dl.con_password_en_claro(emp)
+        except ValueError as e:  # contraseña cifrada en otro equipo: no se intenta el login
+            print(f"{str(emp.get('id')):6s} {str(emp.get('nombre'))[:34]:35s} ❌ {e}", flush=True)
+            fallos += 1
+            continue
         avisos = dl.revisar_credenciales(emp.get("usuario", ""), emp.get("password", ""))
         r = await probar(emp, headless, url)
         print(_linea_resumen(emp, r) + ("   ⚠️ " + "; ".join(avisos) if avisos else ""), flush=True)
@@ -252,6 +258,7 @@ def main() -> int:
     try:
         empleados = dl.leer_empleados(Path(args.empleados))
         emp = dl.elegir_empleado(empleados, args.empleado) if args.empleado else _pedir_empleado(empleados)
+        emp = dl.con_password_en_claro(emp)
     except ValueError as e:
         print(f"❌ {e}")
         return 2

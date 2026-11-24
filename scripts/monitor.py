@@ -15,6 +15,7 @@ config/novedades.json (vacaciones, desactivar, retiro; sin credenciales), y solo
 Las alertas son locales: banda roja, título de la pestaña y, si lo activas, un sonido en esta página.
 """
 import argparse
+import hmac
 import json
 import sys
 import threading
@@ -28,7 +29,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src import bitacora, control_programador, novedades
+from src import bitacora, control_programador, credenciales, novedades
 from src import empleados as empleados_mod
 from src.control_concurrencia import desactivar_seleccion_consola
 from src import diagnostico_login as dl
@@ -165,7 +166,15 @@ def _secretos(ruta_empleados: Optional[Path] = None) -> List[str]:
         empleados = dl.leer_empleados(ruta_empleados) if ruta_empleados else dl.leer_empleados()
     except (ValueError, OSError):
         return []
-    return [str(e[k]) for e in empleados for k in ("usuario", "password") if e.get(k)]
+    secretos = []
+    for e in empleados:
+        secretos += [str(e[k]) for k in ("usuario", "password") if e.get(k)]
+        if credenciales.esta_cifrada(e.get("password")):  # lo que podría salir en un log es la contraseña en claro
+            try:
+                secretos.append(credenciales.revelar(e["password"]))
+            except ValueError:
+                pass
+    return secretos
 
 
 def leer_log(nombre: str, cuantas: int = 150, ruta_empleados: Optional[Path] = None,
@@ -193,6 +202,7 @@ def leer_log(nombre: str, cuantas: int = 150, ruta_empleados: Optional[Path] = N
 RAIZ = Path(__file__).resolve().parent.parent
 ACCIONES = ("iniciar", "detener", "reiniciar", "marcar_pendientes", "novedad")
 _LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+_HOSTS_LOCALES = ("127.0.0.1", "localhost", "::1")
 
 
 def ejecutar_accion(accion: str, raiz: Path = RAIZ) -> str:
@@ -260,10 +270,22 @@ class Manejador(BaseHTTPRequestHandler):
         if not self.server.token:
             return True
         enviado = (consulta.get("t") or [self.headers.get("X-Token", "")])[0]
-        return enviado == self.server.token
+        return hmac.compare_digest(enviado.encode("utf-8"), self.server.token.encode("utf-8"))
 
     def _es_local(self) -> bool:
         return self.client_address[0] in _LOOPBACK
+
+    def _host_valido(self) -> bool:
+        """Defensa contra DNS rebinding: una web maliciosa abierta en este equipo puede hacer que SU dominio
+        resuelva a 127.0.0.1; la petición sale de aquí, con la cabecera propia y Origin == Host, así que
+        solo el Host la delata. Sin token se exige un Host local; con token (modo red) el token basta."""
+        if self.server.token:
+            return True
+        try:
+            nombre = urlparse("//" + (self.headers.get("Host") or "")).hostname
+        except ValueError:
+            return False
+        return nombre in _HOSTS_LOCALES
 
     def _json(self, codigo: int, cuerpo: Dict) -> None:
         self._responder(codigo, json.dumps(cuerpo, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
@@ -365,6 +387,8 @@ class Manejador(BaseHTTPRequestHandler):
         crudo = self.rfile.read(min(largo, 1024)) if largo > 0 else b""
         if largo > 1024:
             self.close_connection = True  # cuerpo desmesurado: se responde y se cierra
+        if not self._host_valido():
+            return self._json(403, {"ok": False, "mensaje": "Host no permitido."})
         if url.path != "/api/accion":
             return self._json(404, {"ok": False, "mensaje": "No encontrado"})
         if not self._es_local():
@@ -408,7 +432,9 @@ class Manejador(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if not self._autorizado(parse_qs(url.query)):
+        if not self._host_valido():
+            self._responder(403, b"Host no permitido", "text/plain; charset=utf-8")
+        elif not self._autorizado(parse_qs(url.query)):
             self._responder(401, "<h1>401</h1><p>Falta el token: abre la página con <code>?t=TOKEN</code>.</p>".encode("utf-8"))
         elif url.path == "/":
             self._responder(200, PAGINA.encode("utf-8"))

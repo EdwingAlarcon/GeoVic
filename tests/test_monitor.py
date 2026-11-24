@@ -234,6 +234,37 @@ def test_accion_valida_el_cuerpo(control):
     assert llamadas == []
 
 
+def test_dns_rebinding_host_ajeno_no_lee_ni_actua(control):
+    """Una web maliciosa abierta en el servidor puede apuntar su dominio a 127.0.0.1 (DNS rebinding):
+    la petición sale de este equipo, con la cabecera propia y con Origin == Host. Solo el Host la delata."""
+    srv, llamadas = control
+    ajeno = {"Host": "malo.example:8765"}
+    assert _get(srv, "/", ajeno)[0] == 403
+    assert _get(srv, "/api/estado", ajeno)[0] == 403
+    assert _get(srv, "/api/log?f=programador", ajeno)[0] == 403
+    cabeceras = {**OK, **ajeno, "Origin": "http://malo.example:8765"}
+    assert _post(srv, {"accion": "detener"}, cabeceras)[0] == 403
+    assert _post(srv, {"accion": "novedad", "op": "agregar"}, cabeceras)[0] == 403
+    assert llamadas == []
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:8765", "localhost:8765", "LOCALHOST", "[::1]:8765"])
+def test_host_local_se_acepta(control, host):
+    srv, llamadas = control
+    assert _get(srv, "/api/estado", {"Host": host})[0] == 200
+    assert _post(srv, {"accion": "reiniciar"}, {**OK, "Host": host})[0] == 200
+
+
+def test_con_token_el_host_puede_ser_el_de_la_red(monitor_mod, empleados_json):
+    """En modo red (--host 0.0.0.0 --token) se entra por la IP del servidor; el token es la defensa."""
+    srv = _servidor(monitor_mod, empleados_json, token="clave-larga")
+    try:
+        assert _get(srv, "/api/estado?t=clave-larga", {"Host": "172.16.14.28:8765"})[0] == 200
+        assert _get(srv, "/api/estado", {"Host": "172.16.14.28:8765"})[0] == 401
+    finally:
+        srv.shutdown()
+
+
 def test_accion_bloqueada_por_un_marcaje_exige_forzar(monitor_mod, empleados_json, monkeypatch):
     llamadas = []
     monkeypatch.setattr(monitor_mod, "ejecutar_accion", lambda accion, raiz=None: llamadas.append(accion) or "ok")
