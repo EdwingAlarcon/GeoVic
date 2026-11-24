@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src import bitacora
 from src.cache_estado import get_cache
 from src.control_concurrencia import InstanciaYaEnEjecucion, adquirir_instancia_unica, desactivar_seleccion_consola
-from src import novedades
+from src import credenciales, novedades
 from src.empleados import (ausencia_vigente, ausencias_invalidas, cargar_empleados, obtener_horario_dia,
                            reemplazo_de, reemplazos_invalidos, ruta_novedades, ultimos_empleados)
 from src.estado_monitor import confirmacion_de, marcajes_sin_confirmar
@@ -909,6 +909,22 @@ def job_listener(event) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def _revisar_credenciales_al_arrancar(empleados: List[Dict]) -> None:
+    """Avisa (sin detener nada) de contraseñas en claro o que no se pueden descifrar en este equipo."""
+    en_claro = [e for e in empleados if not credenciales.esta_cifrada(e.get("password"))]
+    if en_claro and empleados[0].get("id") != "default":
+        logger.warning(f"⚠️ {len(en_claro)} contraseña(s) en claro en employees.json: ejecuta "
+                       "scripts\\cifrar_credenciales.bat en este equipo para cifrarlas.")
+        bitacora.registrar("aviso", mensaje=f"{len(en_claro)} contraseña(s) en claro en employees.json")
+    for emp in empleados:
+        if credenciales.esta_cifrada(emp.get("password")):
+            try:
+                credenciales.revelar(emp["password"])
+            except credenciales.CredencialIlegible as e:
+                logger.error(f"  ❌ [{emp['id']}] {emp['nombre']}: {e}. NO podrá hacer login.")
+                bitacora.registrar("aviso", emp, mensaje="contraseña cifrada ilegible en este equipo: no podrá hacer login")
+
+
 def main() -> None:
     # stderr a su propio archivo diario para capturar excepciones no manejadas. NO al mismo archivo que
     # el log: tenerlo abierto dos veces impedía rotarlo en Windows (WinError 32 en cada línea).
@@ -935,6 +951,8 @@ def main() -> None:
         logger.warning("⚠️ GEOVICTORIA_HEADLESS está activo: el 26-oct-2026 los clics hechos así NO quedaron "
                        "registrados en el portal real. Verifica cada marcaje en el monitor o desactívalo.")
         bitacora.registrar("aviso", mensaje="headless activo: no validado contra el portal real")
+
+    _revisar_credenciales_al_arrancar(empleados)
 
     logger.info(f"👥 Empleados activos: {len(empleados)}")
     _NOMBRES.update({e["id"]: e["nombre"] for e in empleados})

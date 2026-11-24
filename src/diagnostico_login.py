@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple
 
 from dotenv import load_dotenv
 
+from src import credenciales
 from src.empleados import EMPLOYEES_FILE
 
 
@@ -27,6 +28,14 @@ def leer_empleados(ruta: Path = EMPLOYEES_FILE) -> List[Dict]:
     if not usuario or not password:
         raise ValueError("No hay config/employees.json ni GEOVICTORIA_USER/GEOVICTORIA_PASSWORD en .env")
     return [{"id": "default", "nombre": usuario, "usuario": usuario, "password": password, "activo": True}]
+
+
+def con_password_en_claro(emp: Dict) -> Dict:
+    """Copia del empleado con la contraseña descifrada (si estaba en "dpapi:…"), para el login de prueba.
+
+    Lanza ValueError (CredencialIlegible) con un mensaje claro si no se puede descifrar en este equipo.
+    """
+    return {**emp, "password": credenciales.revelar(emp.get("password"))}
 
 
 def _normalizar(texto: str) -> str:

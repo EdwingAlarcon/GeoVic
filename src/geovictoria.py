@@ -17,9 +17,11 @@ except ImportError:  # ejecución directa: python src/geovictoria.py
 
 try:
     from src.bitacora import registrar
+    from src.credenciales import revelar
     from src.log_diario import ArchivoDiario
 except ImportError:  # ejecución directa: python src/geovictoria.py
     from bitacora import registrar
+    from credenciales import revelar
     from log_diario import ArchivoDiario
 
 
@@ -76,6 +78,17 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+def enmascarar_usuario(usuario: Optional[str]) -> str:
+    """Usuario del portal apto para el log: 2 primeros caracteres + *** (+ el dominio si es un correo).
+
+    El nombre del empleado ya va en el tag; el usuario completo en un archivo de log solo ayuda a quien
+    quiera probar contraseñas contra el portal.
+    """
+    local, arroba, dominio = (usuario or "").strip().partition("@")
+    oculto = "***" if len(local) <= 2 else f"{local[:2]}***"
+    return oculto + (f"@{dominio}" if arroba else "")
+
+
 def _tag(empleado: Optional[Dict]) -> str:
     """Prefijo de log para identificar el empleado en modo multi-empleado."""
     if empleado and empleado.get("id", "default") != "default":
@@ -86,7 +99,8 @@ def _tag(empleado: Optional[Dict]) -> str:
 def get_credentials(empleado: Optional[Dict] = None):
     """Obtiene credenciales desde el dict de empleado o desde variables de entorno."""
     if empleado:
-        return empleado["usuario"], empleado["password"]
+        # "dpapi:…" se descifra aquí, justo antes del login; si no se puede, falla solo este empleado
+        return empleado["usuario"], revelar(empleado["password"])
 
     usuario = os.getenv("GEOVICTORIA_USER")
     password = os.getenv("GEOVICTORIA_PASSWORD")
@@ -317,7 +331,7 @@ async def run(accion_esperada: Optional[str] = None, empleado: Optional[Dict] = 
         usuario, password = get_credentials(empleado)
         logger.info("=" * 60)
         logger.info(f"{tag}Iniciando marcaje GeoVictoria")
-        logger.info(f"{tag}Usuario: {usuario}")
+        logger.info(f"{tag}Usuario: {enmascarar_usuario(usuario)}")
         if accion_esperada:
             logger.info(f"{tag}Acción esperada: {accion_esperada}")
         logger.info("=" * 60)
