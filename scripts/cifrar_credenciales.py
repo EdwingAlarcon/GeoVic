@@ -49,16 +49,21 @@ def cifrar_archivo(ruta: Path, solo_revisar: bool = False) -> Tuple[int, int]:
         cifradas += 1
 
     if cifradas and not solo_revisar:
-        fd, temporal = tempfile.mkstemp(prefix=".employees_", suffix=".tmp", dir=str(ruta.parent))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(datos, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            os.replace(temporal, ruta)
-        except BaseException:
-            Path(temporal).unlink(missing_ok=True)
-            raise
+        escribir_atomico(ruta, datos)
     return cifradas, ya
+
+
+def escribir_atomico(ruta: Path, datos) -> None:
+    """Reemplaza el archivo de una vez: nunca queda a medio escribir ni deja temporales."""
+    fd, temporal = tempfile.mkstemp(prefix=".employees_", suffix=".tmp", dir=str(ruta.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(datos, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(temporal, ruta)
+    except BaseException:
+        Path(temporal).unlink(missing_ok=True)
+        raise
 
 
 def main() -> int:
